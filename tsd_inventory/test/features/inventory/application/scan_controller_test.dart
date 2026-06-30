@@ -13,9 +13,6 @@ class _MockDb extends Mock implements AppDatabase {}
 
 class _MockFeedback extends Mock implements FeedbackService {}
 
-int _calls(String method, Invocation i) =>
-    i.memberName.toString().contains(method) ? 1 : 0;
-
 DocTableRow _row(int line, String code) => DocTableRow(
       lineNumber: line,
       inventoryNumber: '',
