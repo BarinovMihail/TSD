@@ -3,6 +3,26 @@ import 'package:flutter/material.dart';
 /// Тема: крупная, контрастная, «палочко-устойчивая» для ТСД M3 SL20.
 ThemeData appTheme() {
   final base = ThemeData.light(useMaterial3: true);
+  // Цвета текста задаём явно: ThemeData.copyWith(textTheme: ...copyWith(...))
+  // сбрасывает color в null → текст становится невидимым. Поэтому применяем
+  // applyDisplayVariant для подстановки colorScheme.onSurface к нашим стилям.
+  const onText = Colors.black;
+  final textTheme = base.textTheme
+      .copyWith(
+        bodyLarge: const TextStyle(fontSize: 20, height: 1.3),
+        bodyMedium: const TextStyle(fontSize: 18, height: 1.3),
+        titleLarge: const TextStyle(
+            fontSize: 24, fontWeight: FontWeight.w700, color: onText),
+        titleMedium: const TextStyle(
+            fontSize: 20, fontWeight: FontWeight.w600, color: onText),
+        labelLarge: const TextStyle(
+            fontSize: 20, fontWeight: FontWeight.w600, color: onText),
+      )
+      .apply(
+        bodyColor: onText,
+        displayColor: onText,
+      );
+
   return base.copyWith(
     colorScheme: const ColorScheme.highContrastLight(
       primary: Color(0xFF0D47A1), // тёмно-синий
@@ -13,13 +33,7 @@ ThemeData appTheme() {
       surface: Colors.white,
       onSurface: Colors.black,
     ),
-    textTheme: base.textTheme.copyWith(
-      bodyLarge: const TextStyle(fontSize: 20, height: 1.3),
-      bodyMedium: const TextStyle(fontSize: 18, height: 1.3),
-      titleLarge: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
-      titleMedium: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-      labelLarge: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-    ),
+    textTheme: textTheme,
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         minimumSize: const Size.fromHeight(64),
@@ -31,6 +45,11 @@ ThemeData appTheme() {
       contentPadding: EdgeInsets.all(16),
       border: OutlineInputBorder(),
       filled: true,
+      fillColor: Colors.white,
+      // Явные цвета: вводимый текст и подписи — чёрные на белой заливке.
+      hintStyle: TextStyle(color: Colors.black54),
+      labelStyle: TextStyle(color: Colors.black87),
+      floatingLabelStyle: TextStyle(color: Colors.black),
     ),
     cardTheme: CardThemeData(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),

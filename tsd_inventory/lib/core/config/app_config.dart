@@ -2,7 +2,7 @@
 /// baseUrl настраивается (см. README): 10.0.2.2 для эмулятора, IP сервера для ТСД.
 class AppConfig {
   const AppConfig({
-    this.baseUrl = 'http://10.0.2.2/ERP_Local',
+    this.baseUrl = 'http://192.168.1.51/ERP_Local',
     this.scannerMode = ScannerMode.keyboardWedge,
     this.connectTimeoutSec = 10,
     this.receiveTimeoutSec = 30,
