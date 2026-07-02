@@ -53,6 +53,12 @@ class ScanController extends ChangeNotifier {
   int get total => rows.length;
   int get scannedCount => rows.where((r) => r.isFound).length;
 
+  /// Есть ли хоть одна строка с расхождением (факт ≠ учёту).
+  bool get hasDiscrepancies => rows.any((r) => r.hasDiscrepancy);
+
+  /// Все ли позиции отсканированы (факт > 0 у каждой строки).
+  bool get isFullyScanned => rows.isNotEmpty && scannedCount == total;
+
   /// Главная точка входа: отсканированный код → реакция.
   Future<ScanOutcome> onScanned(String code) async {
     final res = _matcher.match(code, rows);
@@ -115,7 +121,15 @@ class ScanController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Отправка результатов в 1С. Успех → очистка локального прогресса.
+  /// Заменить строки свежими данными с сервера (reload). Прогресс (факт)
+  /// восстанавливается отдельно через [hydrateFromDb].
+  void replaceRows(List<DocTableRow> fresh) {
+    rows = List.of(fresh);
+    notifyListeners();
+  }
+
+  /// Отправка результатов в 1С. Успех → очистка локального прогресса
+  /// и пометка документа как полностью отправленного (для метки в списке).
   Future<Result<void>> commit() async {
     final lines = <int, LineResult>{};
     for (final r in rows) {
@@ -124,6 +138,7 @@ class ScanController extends ChangeNotifier {
     final res = await _repo.postDocResult(docCode, lines);
     if (res is Success) {
       await _db.clearScanProgress(docCode);
+      await _db.markDocCompleted(docCode);
     }
     return res;
   }

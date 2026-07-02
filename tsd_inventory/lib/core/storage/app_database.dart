@@ -32,13 +32,34 @@ class CachedDoc extends Table {
   Set<Column> get primaryKey => {code};
 }
 
-@DriftDatabase(tables: [ScanProgress, CachedDoc])
+/// Документы, полностью отправленные в 1С (по кнопке «Завершить»).
+/// Локальный флаг для метки «✓ Отправлен» в списке документов.
+class CompletedDoc extends Table {
+  TextColumn get code => text()();
+  DateTimeColumn get completedAt =>
+      dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column> get primaryKey => {code};
+}
+
+@DriftDatabase(tables: [ScanProgress, CachedDoc, CompletedDoc])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_open());
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) => m.createAll(),
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await m.createTable(completedDoc);
+          }
+        },
+      );
 
   // --- ScanProgress ---
 
@@ -95,6 +116,26 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> clearCachedDoc(String code) async {
     await (delete(cachedDoc)..where((t) => t.code.equals(code))).go();
+  }
+
+  // --- CompletedDoc ---
+
+  /// Пометить документ как полностью отправленный в 1С.
+  Future<void> markDocCompleted(String code) async {
+    await into(completedDoc).insertOnConflictUpdate(
+      CompletedDocCompanion.insert(code: code),
+    );
+  }
+
+  /// Все коды документов, помеченных отправленными.
+  Future<Set<String>> allCompletedDocCodes() async {
+    final rows = await select(completedDoc).get();
+    return {for (final r in rows) r.code};
+  }
+
+  /// Снять пометку «отправлен» (например, ручная отмена пользователем).
+  Future<void> unmarkDocCompleted(String code) async {
+    await (delete(completedDoc)..where((t) => t.code.equals(code))).go();
   }
 }
 

@@ -2,75 +2,79 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tsd_inventory/features/docs/domain/doc_list_parser.dart';
 
 void main() {
-  test('обходит обёртку #value и парсит поля', () {
-    final json = [
-      {
-        '#value': {
-          'Ref': 'bdb920e7-738f-11f1-bb02-e83525ee0c0b',
-          'Date': '2026-06-29T10:54:23',
-          'Number': 'АЕ-00000002',
-          'Posted': true,
-          'Организация': '3d074bd8-4bcb-11e5-9b25-000c299754cd',
-          'Подразделение': '141190b0-bb5d-11e5-9b78-002590fbf13d',
-        }
+  test('парсит объект с числовыми ключами и русскими полями', () {
+    final json = {
+      '1': {
+        'НомерДок': 'АЕ-00000002',
+        'Подразделение': 'Отдел закупок',
+        'Дата': '29.06.2026 10:54:23',
       },
-    ];
+      '2': {
+        'НомерДок': 'АЕ-00000003',
+        'Подразделение': 'Отдел закупок',
+        'Дата': '01.07.2026 9:37:00',
+      },
+    };
     final list = parseDocList(json);
-    expect(list.length, 1);
-    final d = list.single;
-    expect(d.ref, 'bdb920e7-738f-11f1-bb02-e83525ee0c0b');
-    expect(d.number, 'АЕ-00000002');
-    expect(d.posted, true);
-    expect(d.date, DateTime.parse('2026-06-29T10:54:23'));
-    expect(d.organizationGuid, '3d074bd8-4bcb-11e5-9b25-000c299754cd');
-    expect(d.departmentGuid, '141190b0-bb5d-11e5-9b78-002590fbf13d');
+    expect(list.length, 2);
+    // Сортировка по дате: 29.06 раньше 01.07.
+    expect(list[0].number, 'АЕ-00000002');
+    expect(list[0].department, 'Отдел закупок');
+    expect(list[0].date, DateTime(2026, 6, 29, 10, 54, 23));
+    expect(list[1].number, 'АЕ-00000003');
+    // Час без ведущего нуля тоже разбирается.
+    expect(list[1].date, DateTime(2026, 7, 1, 9, 37, 0));
   });
 
-  test('пустые GUID → null', () {
-    final json = [
-      {
-        '#value': {
-          'Ref': 'ref1',
-          'Date': '2026-06-29T10:54:23',
-          'Number': 'АЕ-00000001',
-          'Posted': false,
-          'Организация': '',
-          'Подразделение': '',
-          'Ответственный': '',
-        }
+  test('пустое подразделение → null', () {
+    final json = {
+      '1': {
+        'НомерДок': 'АЕ-00000001',
+        'Подразделение': '',
+        'Дата': '29.06.2026 10:54:23',
       },
-    ];
+    };
     final d = parseDocList(json).single;
-    expect(d.organizationGuid, isNull);
-    expect(d.departmentGuid, isNull);
-    expect(d.responsibleGuid, isNull);
+    expect(d.department, isNull);
     expect(d.posted, false);
   });
 
-  test('невалидная дата → элемент пропускается, список не падает', () {
-    final json = [
-      {
-        '#value': {'Ref': 'bad', 'Date': 'not-a-date', 'Number': 'X-1', 'Posted': true}
-      },
-      {
-        '#value': {'Ref': 'good', 'Date': '2026-06-29T10:54:23', 'Number': 'X-2', 'Posted': true}
-      },
-    ];
+  test('отсутствует НомерДок → элемент пропускается', () {
+    final json = {
+      '1': {'Подразделение': 'Отдел закупок', 'Дата': '29.06.2026 10:54:23'},
+      '2': {'НомерДок': 'АЕ-00000002', 'Дата': '01.07.2026 9:37:00'},
+    };
     final list = parseDocList(json);
     expect(list.length, 1);
-    expect(list.single.ref, 'good');
+    expect(list.single.number, 'АЕ-00000002');
   });
 
-  test('отсутствие #value → элемент трактуется как сам Map', () {
-    final json = [
-      {'Ref': 'direct', 'Date': '2026-06-29T10:54:23', 'Number': 'D-1', 'Posted': true},
-    ];
-    final d = parseDocList(json).single;
-    expect(d.ref, 'direct');
-    expect(d.number, 'D-1');
+  test('невалидная дата → элемент пропускается, список не падает', () {
+    final json = {
+      '1': {'НомерДок': 'X-1', 'Дата': 'not-a-date'},
+      '2': {'НомерДок': 'X-2', 'Дата': '01.07.2026 9:37:00'},
+    };
+    final list = parseDocList(json);
+    expect(list.length, 1);
+    expect(list.single.number, 'X-2');
   });
 
-  test('пустой массив → пустой список', () {
+  test('Posted сохраняется, если пришёл', () {
+    final json = {
+      '1': {
+        'НомерДок': 'АЕ-00000002',
+        'Дата': '29.06.2026 10:54:23',
+        'Posted': true,
+      },
+    };
+    expect(parseDocList(json).single.posted, true);
+  });
+
+  test('пустой объект → пустой список', () {
+    expect(parseDocList({}), isEmpty);
+  });
+
+  test('не объект (например массив) → пустой список', () {
     expect(parseDocList([]), isEmpty);
   });
 }

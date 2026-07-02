@@ -10,9 +10,14 @@ import 'providers.dart';
 import 'scan_controller.dart';
 
 /// Семейство контроллеров экрана по коду документа.
+/// autoDispose: при выходе с экрана (контекст убран из дерева) провайдер
+/// диспозится → при повторном входе пересоздаётся → init() зовёт запрос к
+/// серверу заново (свежие данные). Прогресс сканирования при этом не теряется:
+/// он хранится в БД и восстанавливается через hydrateFromDb().
 final inventoryScreenControllerProvider =
-    ChangeNotifierProvider.family<InventoryScreenController, String>(
-        (ref, docCode) {
+    ChangeNotifierProvider.autoDispose
+        .family<InventoryScreenController, String>((ref, docCode) {
+  // keepAlive НЕ нужен: хотим пересоздание при выходе/входе.
   return InventoryScreenController(
     docCode: docCode,
     repo: ref.watch(inventoryRepositoryProvider),
@@ -67,6 +72,23 @@ class InventoryScreenController extends ChangeNotifier {
     }
     loading = false;
     notifyListeners();
+  }
+
+  /// Перечитать табличную часть с сервера (pull-to-refresh или повторный вход).
+  /// Прогресс сканирования (КоличествоФактическое) накладывается из БД, поэтому
+  /// не теряется.
+  Future<void> reload() async {
+    final scan = this.scan;
+    if (scan == null) return;
+    final res = await repo.getTable(docCode);
+    res.maybeWhen(
+      onValue: (rows) async {
+        scan.replaceRows(rows);
+        await scan.hydrateFromDb();
+        notifyListeners();
+      },
+      orElse: (_) {},
+    );
   }
 
   void _onScanChanged() => notifyListeners();

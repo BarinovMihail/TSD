@@ -4,10 +4,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/scanner/keyboard_wedge_scanner.dart';
 import '../../../l10n/app_strings.dart';
+import '../../docs/application/completed_docs_provider.dart';
 import '../application/inventory_screen_controller.dart';
 import '../application/scan_controller.dart';
 import '../domain/doc_table_row.dart';
-import 'keyboard_wedge_field.dart';
 import 'row_card.dart';
 
 class InventoryScreen extends ConsumerStatefulWidget {
@@ -20,17 +20,28 @@ class InventoryScreen extends ConsumerStatefulWidget {
 
 class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   late final KeyboardWedgeScanner _scanner;
+  final _scanFocus = FocusNode();
 
   @override
   void initState() {
     super.initState();
     _scanner = KeyboardWedgeScanner();
     _scanner.codes.listen(_onCode);
+    // Авто-возврат фокуса к wedge-узлу: сканер снова работает после тапа
+    // по полю поиска (там фокус нужен для набора, но затем возвращается сюда).
+    _scanFocus.addListener(() {
+      if (mounted && !_scanFocus.hasFocus) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && !_scanFocus.hasFocus) _scanFocus.requestFocus();
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
     _scanner.dispose();
+    _scanFocus.dispose();
     super.dispose();
   }
 
@@ -101,7 +112,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
               final r = candidates[i];
               return ListTile(
                 title: Text(r.nomenclature),
-                subtitle: Text('Инв. ${r.inventoryNumber}'),
+                subtitle: Text(_ambiguousSubTitle(r)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _scan?.applyChoice(r);
@@ -119,21 +130,56 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     );
   }
 
+  /// Подпись строки в списке неоднозначных совпадений: инв. номер и
+  /// характеристика (чтобы различить одинаковые позиции по характеристике).
+  String _ambiguousSubTitle(DocTableRow r) {
+    final char = r.characteristic.trim();
+    final inv = 'Инв. ${r.inventoryNumber}';
+    return char.isEmpty ? inv : '$inv | $char';
+  }
+
   Future<void> _finish() async {
     final scan = _scan;
     if (scan == null) return;
+    final hasDiscrepancies = scan.hasDiscrepancies;
+    final fullyScanned = scan.isFullyScanned;
+    // Приоритет: непросканировано → расхождения → всё ок.
+    final String title;
+    final String contentText;
+    final String confirmLabel;
+    if (!fullyScanned) {
+      final left = scan.total - scan.scannedCount;
+      title = 'Отправить неполные результаты?';
+      contentText = 'Отсканировано ${scan.scannedCount} из ${scan.total} '
+          'позиций ($left не отсканировано). Отправить как есть?';
+      confirmLabel = 'Отправить неполное';
+    } else if (hasDiscrepancies) {
+      title = 'Отправить результаты с расхождениями?';
+      contentText =
+          'По некоторым позициям фактическое количество не совпадает с учётом. '
+          'Результаты будут отправлены как есть.';
+      confirmLabel = 'Отправить с расхождением';
+    } else {
+      title = 'Завершить и отправить?';
+      contentText =
+          'Все позиции отсканированы без расхождений. Отправить результаты в 1С?';
+      confirmLabel = 'Отправить';
+    }
     final ok = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text(AppStrings.finish),
-            content: Text(AppStrings.finishConfirm),
+            title: Text(title),
+            content: Text(contentText),
+            actionsAlignment: MainAxisAlignment.spaceBetween,
+            actionsOverflowAlignment: OverflowBarAlignment.center,
+            actionsOverflowButtonSpacing: 8,
             actions: [
-              TextButton(
+              OutlinedButton(
                   onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text(AppStrings.no)),
+                  child: const Text('Проверить ещё раз')),
               ElevatedButton(
                   onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text(AppStrings.yes)),
+                  child: Text(confirmLabel)),
             ],
           ),
         ) ??
@@ -143,6 +189,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     if (!mounted) return;
     res.maybeWhen(
       onValue: (_) {
+        // Обновляем метку «отправлен» в списке документов.
+        ref.invalidate(completedDocsProvider);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Результаты отправлены'),
             backgroundColor: Colors.green));
@@ -175,7 +223,12 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
               ? Center(
                   child: Text(ctrl.loadError!,
                       style: const TextStyle(fontSize: 18)))
-              : _Body(ctrl: ctrl, scanner: _scanner),
+              : Focus(
+                  focusNode: _scanFocus,
+                  onKeyEvent: _scanner.handleKeyEvent,
+                  autofocus: true,
+                  child: _Body(ctrl: ctrl),
+                ),
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -191,9 +244,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
 }
 
 class _Body extends ConsumerWidget {
-  const _Body({required this.ctrl, required this.scanner});
+  const _Body({required this.ctrl});
   final InventoryScreenController ctrl;
-  final KeyboardWedgeScanner scanner;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -259,16 +311,14 @@ class _Body extends ConsumerWidget {
           onChanged: ctrl.toggleSort,
           title: const Text(AppStrings.sortUnscannedFirst),
         ),
-        // Сканер-поле.
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: KeyboardWedgeField(scanner: scanner),
-        ),
-        // Список строк.
+        // Список строк + pull-to-refresh.
         Expanded(
-          child: ListView.builder(
-            itemCount: rows.length,
-            itemBuilder: (context, i) => RowCard(row: rows[i]),
+          child: RefreshIndicator(
+            onRefresh: ctrl.reload,
+            child: ListView.builder(
+              itemCount: rows.length,
+              itemBuilder: (context, i) => RowCard(row: rows[i]),
+            ),
           ),
         ),
       ],

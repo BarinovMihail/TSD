@@ -49,21 +49,27 @@ class InventoryRepository {
     }
   }
 
-  /// Запись фактических количеств. Эндпоинт/метод/тело — ПОДЛЕЖАТ уточнению 1С.
-  /// TODO(1С): уточнить URL/метод/тело с разработчиком 1С.
-  /// Предполагаемый: POST /hs/inventory/code/{Код},
-  ///   тело: { "Lines": { "<lineNo>": { "КоличествоФактическое": N, "Действие": "" } } }
+  /// Запись фактических количеств в табличную часть документа 1С.
+  /// POST /hs/inventory/updateFact
+  ///   тело: {
+  ///     "НомерДокумента": "<код>",
+  ///     "Строки": [ { "НомерСтроки": N, "КоличествоФактическое": M }, ... ]
+  ///   }
+  /// Отправляются только строки с ненулевым фактическим количеством
+  /// (то, что фактически просканировано).
   Future<Result<void>> postDocResult(
       String code, Map<int, LineResult> lines) async {
-    final path = 'hs/inventory/code/${Uri.encodeComponent(code)}';
+    const path = 'hs/inventory/updateFact';
     final body = {
-      'Lines': {
+      'НомерДокумента': code,
+      'Строки': [
         for (final e in lines.entries)
-          '${e.key}': {
-            'КоличествоФактическое': e.value.qty,
-            'Действие': e.value.action,
-          }
-      },
+          if (e.value.qty > 0)
+            {
+              'НомерСтроки': e.key,
+              'КоличествоФактическое': e.value.qty,
+            },
+      ],
     };
     try {
       await _client.postJson<dynamic>(path, body: body);

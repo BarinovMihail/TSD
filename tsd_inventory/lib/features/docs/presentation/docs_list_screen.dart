@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 
 import '../../../l10n/app_strings.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../inventory/application/providers.dart';
+import '../application/completed_docs_provider.dart';
 import '../application/docs_controller.dart';
 import '../domain/doc_list_item.dart';
 
@@ -15,6 +17,7 @@ class DocsListScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final fio = ref.watch(authControllerProvider).session?.fio ?? '';
     final asyncDocs = ref.watch(docsControllerProvider);
+    final asyncCompleted = ref.watch(completedDocsProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -65,22 +68,67 @@ class DocsListScreen extends ConsumerWidget {
                 ref.read(docsControllerProvider.notifier).refresh(),
             child: ListView.builder(
               itemCount: docs.length,
-              itemBuilder: (context, i) => _DocCard(
-                doc: docs[i],
-                onTap: () => context.go('/docs/${docs[i].number}'),
-              ),
+              itemBuilder: (context, i) {
+                final completed = asyncCompleted.maybeWhen(
+                      data: (s) => s.contains(docs[i].number),
+                      orElse: () => false,
+                    ) ||
+                    docs[i].posted;
+                return _DocCard(
+                  doc: docs[i],
+                  completed: completed,
+                  onTap: () => context.go('/docs/${docs[i].number}'),
+                  onUnmark: () => _confirmUnmark(context, ref, docs[i].number),
+                );
+              },
             ),
           );
         },
       ),
     );
   }
+
+  /// Long-press по отправленному документу → подтверждение → снять пометку.
+  Future<void> _confirmUnmark(
+      BuildContext context, WidgetRef ref, String number) async {
+    final ok = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Снять пометку «Отправлен»?'),
+            content: Text(
+                'Документ $number снова будет показан как неотправленный.'),
+            actionsAlignment: MainAxisAlignment.spaceBetween,
+            actionsOverflowButtonSpacing: 8,
+            actions: [
+              OutlinedButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text(AppStrings.cancel)),
+              ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Снять пометку')),
+            ],
+          ),
+        ) ??
+        false;
+    if (!ok) return;
+    final db = ref.read(appDatabaseProvider);
+    await db.unmarkDocCompleted(number);
+    ref.invalidate(completedDocsProvider);
+  }
 }
 
 class _DocCard extends StatelessWidget {
-  const _DocCard({required this.doc, required this.onTap});
+  const _DocCard({
+    required this.doc,
+    required this.completed,
+    required this.onTap,
+    this.onUnmark,
+  });
   final DocListItem doc;
+  final bool completed; // документ полностью отправлен в 1С
   final VoidCallback onTap;
+  // Long-press на отправленном документе → снять пометку. null, если не отправлен.
+  final VoidCallback? onUnmark;
 
   @override
   Widget build(BuildContext context) {
@@ -89,10 +137,18 @@ class _DocCard extends StatelessWidget {
     return Card(
       child: InkWell(
         onTap: onTap,
+        onLongPress: completed ? onUnmark : null,
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
             children: [
+              // Метка «отправлен» — иконка слева.
+              Icon(
+                completed ? Icons.check_circle : Icons.radio_button_unchecked,
+                color: completed ? scheme.secondary : scheme.outline,
+                size: 28,
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -102,31 +158,23 @@ class _DocCard extends StatelessWidget {
                             fontSize: 20, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 4),
                     Text(df.format(doc.date), style: const TextStyle(fontSize: 16)),
-                    if (doc.departmentGuid != null)
+                    if (doc.department != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                            '${AppStrings.deptLabel}: ${doc.departmentGuid}',
+                            '${AppStrings.deptLabel}: ${doc.department}',
                             style: TextStyle(fontSize: 14, color: scheme.outline)),
                       ),
+                    if (completed)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text('✓ Отправлен',
+                            style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: scheme.secondary)),
+                      ),
                   ],
-                ),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: doc.posted
-                      ? scheme.secondary
-                      : scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  doc.posted ? AppStrings.docPosted : AppStrings.docDraft,
-                  style: TextStyle(
-                      color:
-                          doc.posted ? scheme.onSecondary : scheme.onSurface,
-                      fontWeight: FontWeight.w700),
                 ),
               ),
             ],

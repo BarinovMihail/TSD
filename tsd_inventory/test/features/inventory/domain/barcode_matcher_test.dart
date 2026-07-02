@@ -68,4 +68,21 @@ void main() {
     final rows = [_row(1, '000123')];
     expect(BarcodeMatcher().match('  000123  ', rows).isUnique, true);
   });
+
+  test('восклицательные знаки в отсканированном коде заменяются на пробел', () {
+    // Сканер шлёт «618810!!!!!!»; в 1С код хранится без добивки.
+    final rows = [_row(1, '618810'), _row(2, '000456')];
+    expect(BarcodeMatcher().match('618810!!!!!!', rows).isUnique, true);
+    expect(BarcodeMatcher().match('618810!!!!!!', rows).exact.single.lineNumber,
+        1);
+  });
+
+  test('trailing-пробелы игнорируются при сравнении', () {
+    // Отсканировано с добивкой, в 1С — без неё (и наоборот).
+    final rows = [_row(1, '000123')];
+    expect(
+        BarcodeMatcher().match('000123      ', rows).isUnique, true); // скан
+    final rows2 = [_row(1, '000123      ')]; // 1С с фиксированной шириной
+    expect(BarcodeMatcher().match('000123', rows2).isUnique, true);
+  });
 }

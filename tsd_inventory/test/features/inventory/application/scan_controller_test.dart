@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:tsd_inventory/core/feedback/feedback_service.dart';
+import 'package:tsd_inventory/core/network/api_error.dart';
+import 'package:tsd_inventory/core/result/result.dart';
 import 'package:tsd_inventory/core/storage/app_database.dart';
 import 'package:tsd_inventory/features/inventory/application/scan_controller.dart';
 import 'package:tsd_inventory/features/inventory/data/inventory_repository.dart';
@@ -62,6 +64,8 @@ void main() {
           qtyActual: any(named: 'qtyActual'),
           action: any(named: 'action'),
         )).thenAnswer((_) async {});
+    when(() => db.clearScanProgress(any())).thenAnswer((_) async {});
+    when(() => db.markDocCompleted(any())).thenAnswer((_) async {});
   });
 
   test('найдено ровно одно → +1 факт, success, persist', () async {
@@ -124,5 +128,52 @@ void main() {
     expect(controller.scannedCount, 0);
     await controller.onScanned('000123');
     expect(controller.scannedCount, 1);
+  });
+
+  group('commit', () {
+    setUp(() {
+      // Нужен для verifyNoMoreInteractions, чтобы разрешить stub-ы прогресса.
+    });
+
+    test('успех → отправка в репозиторий, очистка прогресса и пометка «отправлен»',
+        () async {
+      when(() => repo.postDocResult(any(), any<Map<int, LineResult>>()))
+          .thenAnswer((_) async => const Success(null));
+      final controller = _controller(
+          repo: repo,
+          db: db,
+          feedback: feedback,
+          rows: [_row(1, '000123'), _row(2, '000456')]);
+      await controller.onScanned('000123'); // строка 1 → факт 1
+      await controller.onScanned('000456'); // строка 2 → факт 1
+
+      final res = await controller.commit();
+
+      expect(res, isA<Success>());
+      final captured = verify(() => repo.postDocResult(
+              captureAny(), captureAny<Map<int, LineResult>>()))
+          .captured;
+      expect(captured[0], 'АЕ-1');
+      final lines = captured[1] as Map<int, LineResult>;
+      expect(lines[1]?.qty, 1);
+      expect(lines[2]?.qty, 1);
+      verify(() => db.clearScanProgress('АЕ-1')).called(1);
+      verify(() => db.markDocCompleted('АЕ-1')).called(1);
+    });
+
+    test('сбой записи → прогресс НЕ очищается и НЕ помечается отправленным',
+        () async {
+      when(() => repo.postDocResult(any(), any<Map<int, LineResult>>()))
+          .thenAnswer((_) async => const Failure(ServerError(code: 500)));
+      final controller = _controller(
+          repo: repo, db: db, feedback: feedback, rows: [_row(1, '000123')]);
+      await controller.onScanned('000123');
+
+      final res = await controller.commit();
+
+      expect(res, isA<Failure>());
+      verifyNever(() => db.clearScanProgress(any()));
+      verifyNever(() => db.markDocCompleted(any()));
+    });
   });
 }

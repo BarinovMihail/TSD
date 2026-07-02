@@ -1,30 +1,24 @@
 /// Документ инвентаризации из списка /fio/.
 class DocListItem {
   const DocListItem({
-    required this.ref,
     required this.number,
     required this.date,
-    required this.posted,
-    this.organizationGuid,
-    this.departmentGuid,
-    this.responsibleGuid,
+    this.department,
+    this.posted = false,
   });
 
-  final String ref; // GUID
-  final String number; // "АЕ-00000002"
+  final String number; // "АЕ-00000002" (НомерДок)
   final DateTime date;
-  final bool posted;
-  final String? organizationGuid; // GUID (человекочитаемого в /fio/ нет)
-  final String? departmentGuid;
-  final String? responsibleGuid;
+  final String? department; // "Отдел закупок" (Подразделение)
+  final bool posted; // флаг проведения, если сервер его вернёт (иначе false)
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is DocListItem &&
           runtimeType == other.runtimeType &&
-          ref == other.ref;
+          number == other.number;
 
   @override
-  int get hashCode => ref.hashCode;
+  int get hashCode => number.hashCode;
 }

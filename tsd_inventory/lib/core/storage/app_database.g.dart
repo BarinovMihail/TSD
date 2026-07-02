@@ -692,16 +692,241 @@ class CachedDocCompanion extends UpdateCompanion<CachedDocData> {
   }
 }
 
+class $CompletedDocTable extends CompletedDoc
+    with TableInfo<$CompletedDocTable, CompletedDocData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CompletedDocTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _codeMeta = const VerificationMeta('code');
+  @override
+  late final GeneratedColumn<String> code = GeneratedColumn<String>(
+    'code',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _completedAtMeta = const VerificationMeta(
+    'completedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> completedAt = GeneratedColumn<DateTime>(
+    'completed_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [code, completedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'completed_doc';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CompletedDocData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('code')) {
+      context.handle(
+        _codeMeta,
+        code.isAcceptableOrUnknown(data['code']!, _codeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_codeMeta);
+    }
+    if (data.containsKey('completed_at')) {
+      context.handle(
+        _completedAtMeta,
+        completedAt.isAcceptableOrUnknown(
+          data['completed_at']!,
+          _completedAtMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {code};
+  @override
+  CompletedDocData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CompletedDocData(
+      code: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}code'],
+      )!,
+      completedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}completed_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CompletedDocTable createAlias(String alias) {
+    return $CompletedDocTable(attachedDatabase, alias);
+  }
+}
+
+class CompletedDocData extends DataClass
+    implements Insertable<CompletedDocData> {
+  final String code;
+  final DateTime completedAt;
+  const CompletedDocData({required this.code, required this.completedAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['code'] = Variable<String>(code);
+    map['completed_at'] = Variable<DateTime>(completedAt);
+    return map;
+  }
+
+  CompletedDocCompanion toCompanion(bool nullToAbsent) {
+    return CompletedDocCompanion(
+      code: Value(code),
+      completedAt: Value(completedAt),
+    );
+  }
+
+  factory CompletedDocData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CompletedDocData(
+      code: serializer.fromJson<String>(json['code']),
+      completedAt: serializer.fromJson<DateTime>(json['completedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'code': serializer.toJson<String>(code),
+      'completedAt': serializer.toJson<DateTime>(completedAt),
+    };
+  }
+
+  CompletedDocData copyWith({String? code, DateTime? completedAt}) =>
+      CompletedDocData(
+        code: code ?? this.code,
+        completedAt: completedAt ?? this.completedAt,
+      );
+  CompletedDocData copyWithCompanion(CompletedDocCompanion data) {
+    return CompletedDocData(
+      code: data.code.present ? data.code.value : this.code,
+      completedAt: data.completedAt.present
+          ? data.completedAt.value
+          : this.completedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompletedDocData(')
+          ..write('code: $code, ')
+          ..write('completedAt: $completedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(code, completedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CompletedDocData &&
+          other.code == this.code &&
+          other.completedAt == this.completedAt);
+}
+
+class CompletedDocCompanion extends UpdateCompanion<CompletedDocData> {
+  final Value<String> code;
+  final Value<DateTime> completedAt;
+  final Value<int> rowid;
+  const CompletedDocCompanion({
+    this.code = const Value.absent(),
+    this.completedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CompletedDocCompanion.insert({
+    required String code,
+    this.completedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : code = Value(code);
+  static Insertable<CompletedDocData> custom({
+    Expression<String>? code,
+    Expression<DateTime>? completedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (code != null) 'code': code,
+      if (completedAt != null) 'completed_at': completedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CompletedDocCompanion copyWith({
+    Value<String>? code,
+    Value<DateTime>? completedAt,
+    Value<int>? rowid,
+  }) {
+    return CompletedDocCompanion(
+      code: code ?? this.code,
+      completedAt: completedAt ?? this.completedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (code.present) {
+      map['code'] = Variable<String>(code.value);
+    }
+    if (completedAt.present) {
+      map['completed_at'] = Variable<DateTime>(completedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompletedDocCompanion(')
+          ..write('code: $code, ')
+          ..write('completedAt: $completedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $ScanProgressTable scanProgress = $ScanProgressTable(this);
   late final $CachedDocTable cachedDoc = $CachedDocTable(this);
+  late final $CompletedDocTable completedDoc = $CompletedDocTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities => [scanProgress, cachedDoc];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+    scanProgress,
+    cachedDoc,
+    completedDoc,
+  ];
 }
 
 typedef $$ScanProgressTableCreateCompanionBuilder =
@@ -1089,6 +1314,151 @@ typedef $$CachedDocTableProcessedTableManager =
       CachedDocData,
       PrefetchHooks Function()
     >;
+typedef $$CompletedDocTableCreateCompanionBuilder =
+    CompletedDocCompanion Function({
+      required String code,
+      Value<DateTime> completedAt,
+      Value<int> rowid,
+    });
+typedef $$CompletedDocTableUpdateCompanionBuilder =
+    CompletedDocCompanion Function({
+      Value<String> code,
+      Value<DateTime> completedAt,
+      Value<int> rowid,
+    });
+
+class $$CompletedDocTableFilterComposer
+    extends Composer<_$AppDatabase, $CompletedDocTable> {
+  $$CompletedDocTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get code => $composableBuilder(
+    column: $table.code,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CompletedDocTableOrderingComposer
+    extends Composer<_$AppDatabase, $CompletedDocTable> {
+  $$CompletedDocTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get code => $composableBuilder(
+    column: $table.code,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CompletedDocTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CompletedDocTable> {
+  $$CompletedDocTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get code =>
+      $composableBuilder(column: $table.code, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => column,
+  );
+}
+
+class $$CompletedDocTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CompletedDocTable,
+          CompletedDocData,
+          $$CompletedDocTableFilterComposer,
+          $$CompletedDocTableOrderingComposer,
+          $$CompletedDocTableAnnotationComposer,
+          $$CompletedDocTableCreateCompanionBuilder,
+          $$CompletedDocTableUpdateCompanionBuilder,
+          (
+            CompletedDocData,
+            BaseReferences<_$AppDatabase, $CompletedDocTable, CompletedDocData>,
+          ),
+          CompletedDocData,
+          PrefetchHooks Function()
+        > {
+  $$CompletedDocTableTableManager(_$AppDatabase db, $CompletedDocTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CompletedDocTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CompletedDocTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CompletedDocTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> code = const Value.absent(),
+                Value<DateTime> completedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CompletedDocCompanion(
+                code: code,
+                completedAt: completedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String code,
+                Value<DateTime> completedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CompletedDocCompanion.insert(
+                code: code,
+                completedAt: completedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CompletedDocTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CompletedDocTable,
+      CompletedDocData,
+      $$CompletedDocTableFilterComposer,
+      $$CompletedDocTableOrderingComposer,
+      $$CompletedDocTableAnnotationComposer,
+      $$CompletedDocTableCreateCompanionBuilder,
+      $$CompletedDocTableUpdateCompanionBuilder,
+      (
+        CompletedDocData,
+        BaseReferences<_$AppDatabase, $CompletedDocTable, CompletedDocData>,
+      ),
+      CompletedDocData,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -1097,4 +1467,6 @@ class $AppDatabaseManager {
       $$ScanProgressTableTableManager(_db, _db.scanProgress);
   $$CachedDocTableTableManager get cachedDoc =>
       $$CachedDocTableTableManager(_db, _db.cachedDoc);
+  $$CompletedDocTableTableManager get completedDoc =>
+      $$CompletedDocTableTableManager(_db, _db.completedDoc);
 }

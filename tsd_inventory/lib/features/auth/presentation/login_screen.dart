@@ -23,11 +23,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    // Восстановить сохранённый логин (если был).
+    // Восстановить сохранённые логин/пароль и состояние чекбоксов (если были).
     Future(() async {
-      final login =
-          await ref.read(secureCredentialsStoreProvider).readLogin();
-      if (login != null && mounted) setState(() => _loginCtrl.text = login);
+      final store = ref.read(secureCredentialsStoreProvider);
+      final login = await store.readLogin();
+      final password = await store.readPassword();
+      if (!mounted) return;
+      setState(() {
+        if (login != null) _loginCtrl.text = login;
+        // «Запомнить логин» включён, если логин сохранён.
+        _rememberLogin = login != null;
+        if (password != null) {
+          _passCtrl.text = password;
+          // Пароль сохранён → чекбокс «запомнить пароль» был включён.
+          _rememberPassword = true;
+        }
+      });
     });
   }
 
