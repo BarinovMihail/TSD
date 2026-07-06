@@ -6,6 +6,7 @@ class AppConfig {
     this.scannerMode = ScannerMode.keyboardWedge,
     this.connectTimeoutSec = 10,
     this.receiveTimeoutSec = 30,
+    this.updateManifestUrl = '',
   });
 
   /// Базовый URL HTTP-сервисов 1С (без /hs/...).
@@ -13,6 +14,11 @@ class AppConfig {
   final ScannerMode scannerMode;
   final int connectTimeoutSec;
   final int receiveTimeoutSec;
+
+  /// URL JSON-манифеста версий для автообновления.
+  /// Пусто (по умолчанию) → фича выключена, проверка не идёт.
+  /// Заполнить, когда определится хостинг (см. README «Контроль версий»).
+  final String updateManifestUrl;
 
   /// Конструирует полный путь: baseUrl + '/hs/inventory/' + path.
   String inventoryPath(String path) {

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/presentation/confirm_dialog.dart';
 import '../../../l10n/app_strings.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../inventory/application/providers.dart';
@@ -91,29 +92,26 @@ class DocsListScreen extends ConsumerWidget {
   /// Long-press по отправленному документу → подтверждение → снять пометку.
   Future<void> _confirmUnmark(
       BuildContext context, WidgetRef ref, String number) async {
-    final ok = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Снять пометку «Отправлен»?'),
-            content: Text(
-                'Документ $number снова будет показан как неотправленный.'),
-            actionsAlignment: MainAxisAlignment.spaceBetween,
-            actionsOverflowButtonSpacing: 8,
-            actions: [
-              OutlinedButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text(AppStrings.cancel)),
-              ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text('Снять пометку')),
-            ],
-          ),
-        ) ??
-        false;
-    if (!ok) return;
-    final db = ref.read(appDatabaseProvider);
-    await db.unmarkDocCompleted(number);
-    ref.invalidate(completedDocsProvider);
+    await ConfirmDialog.show(
+      context,
+      title: const Text('Снять пометку «Отправлен»?'),
+      content: Text.rich(TextSpan(children: [
+        const TextSpan(text: 'Документ '),
+        b(number),
+        const TextSpan(text: ' снова будет показан как неотправленный.'),
+      ])),
+      // Безопасное действие — отмена (заполненная, сверху).
+      primaryLabel: AppStrings.cancel,
+      onPrimary: () {},
+      // Рискованное действие — снять пометку (outline, снизу, красная).
+      secondaryLabel: 'Снять пометку',
+      onSecondary: () async {
+        final db = ref.read(appDatabaseProvider);
+        await db.unmarkDocCompleted(number);
+        ref.invalidate(completedDocsProvider);
+      },
+      destructiveSecondary: true,
+    );
   }
 }
 

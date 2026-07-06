@@ -41,6 +41,24 @@ ThemeData appTheme() {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(56),
+        textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        minimumSize: const Size.fromHeight(48),
+        textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    ),
+    // Больше воздуха под контентом диалога — отступ до кнопок.
+    dialogTheme: const DialogThemeData(
+      actionsPadding: EdgeInsets.fromLTRB(16, 0, 16, 16),
+    ),
     inputDecorationTheme: const InputDecorationTheme(
       contentPadding: EdgeInsets.all(16),
       border: OutlineInputBorder(),

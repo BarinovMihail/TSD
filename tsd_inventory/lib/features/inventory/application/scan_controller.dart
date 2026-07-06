@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../core/feedback/feedback_service.dart';
+import '../../../core/network/api_error.dart';
 import '../../../core/result/result.dart';
 import '../../../core/storage/app_database.dart';
 import '../data/inventory_repository.dart';
+import '../domain/barcode_info.dart';
 import '../domain/barcode_matcher.dart';
 import '../domain/doc_table_row.dart';
 
@@ -12,14 +14,31 @@ sealed class ScanOutcome {
   const ScanOutcome();
 }
 
+/// Совпадение найдено — факт увеличен, прогресс сохранён.
 class Found extends ScanOutcome {
   final DocTableRow row;
   const Found(this.row);
 }
 
-class NotFound extends ScanOutcome {
+/// Штрихкод не зарегистрирован в 1С (регистр сведений вернул пустой ответ).
+class BarcodeNotRegistered extends ScanOutcome {
   final String code;
-  const NotFound(this.code);
+  const BarcodeNotRegistered(this.code);
+}
+
+/// Номенклатура по штрихкоду найдена в 1С, но не сопоставлена ни одной строке
+/// документа (нет строки с такой парой Номенклатура + Характеристика).
+class NotFoundInDocument extends ScanOutcome {
+  final String code;
+  final BarcodeInfo info;
+  const NotFoundInDocument(this.code, this.info);
+}
+
+/// Сетевая/серверная ошибка при запросе данных штрихкода из 1С.
+class LookupError extends ScanOutcome {
+  final String code;
+  final ApiError error;
+  const LookupError(this.code, this.error);
 }
 
 class Ambiguous extends ScanOutcome {
@@ -59,12 +78,33 @@ class ScanController extends ChangeNotifier {
   /// Все ли позиции отсканированы (факт > 0 у каждой строки).
   bool get isFullyScanned => rows.isNotEmpty && scannedCount == total;
 
-  /// Главная точка входа: отсканированный код → реакция.
+  /// Главная точка входа: отсканированный штрихкод → данные из 1С → реакция.
+  ///
+  /// Поток:
+  /// 1. GET /hs/inventory/barcode/{code} → пара (Номенклатура, Характеристика).
+  /// 2. Пара строго сопоставляется строкам документа:
+  ///    - ровно одно совпадение → +1 факт, persist, Found;
+  ///    - несколько → Ambiguous (диалог выбора);
+  ///    - ни одного → NotFoundInDocument.
+  /// 3. Штрихкод не зарегистрирован в 1С (пустой ответ) → BarcodeNotRegistered.
+  /// 4. Сетевая/серверная ошибка → LookupError.
   Future<ScanOutcome> onScanned(String code) async {
-    final res = _matcher.match(code, rows);
+    final infoRes = await _repo.getBarcodeInfo(code);
+    if (infoRes is Failure<BarcodeInfo?>) {
+      await _feedback.error();
+      return LookupError(code, infoRes.error);
+    }
+    final info = (infoRes as Success<BarcodeInfo?>).value;
+    if (info == null) {
+      await _feedback.error();
+      return BarcodeNotRegistered(code);
+    }
+
+    final res = _matcher.matchByNomenclatureCharacteristic(
+        info.nomenclature, info.characteristic, rows);
     if (res.isNone) {
       await _feedback.error();
-      return NotFound(code);
+      return NotFoundInDocument(code, info);
     }
     if (res.isAmbiguous) {
       await _feedback.attention();
@@ -141,5 +181,52 @@ class ScanController extends ChangeNotifier {
       await _db.markDocCompleted(docCode);
     }
     return res;
+  }
+
+  /// Добавить новую строку номенклатуры в документ, когда отсканированный
+  /// штрихкод найден в 1С, но не сопоставлен строке документа.
+  /// POST /hs/inventory/newStr с {Номенклатура, Характеристика} из ответа
+  /// /barcode/ → перечитать табличную часть → поставить факт = 1 по добавленной
+  /// номенклатуре.
+  ///
+  /// Возвращает Success, если строка добавлена и найдена после перезагрузки,
+  /// иначе Failure (сеть/сервер или строка не вернулась от 1С).
+  Future<Result<void>> addMissingLine(BarcodeInfo info) async {
+    final addRes = await _repo.addNewLine(
+        docCode, info.nomenclature, info.characteristic);
+    if (addRes is Failure) return addRes;
+
+    // Перезагружаем табличную часть, чтобы появилась новая строка.
+    final tableRes = await _repo.getTable(docCode);
+    return tableRes.maybeWhen(
+      onValue: (fresh) async {
+        replaceRows(fresh);
+        // Восстанавливаем прогресс по уже отсканированным строкам.
+        await hydrateFromDb();
+        // Ищем добавленную строку через тот же матчер по паре
+        // (Номенклатура, Характеристика), что и при сканировании.
+        final match = _matcher.matchByNomenclatureCharacteristic(
+            info.nomenclature, info.characteristic, rows);
+        if (match.exact.isEmpty) {
+          // 1С не вернула строку с такой парой — не получилось её отметить.
+          return const Failure(ParseError(
+              'Новая строка не найдена после добавления'));
+        }
+        final i = rows.indexWhere(
+            (r) => r.lineNumber == match.exact.first.lineNumber);
+        rows[i] = rows[i].copyWith(qtyActual: 1);
+        await _db.upsertScanProgress(
+          docCode: docCode,
+          lineNo: rows[i].lineNumber,
+          nomenclatureCode: rows[i].nomenclatureCode,
+          qtyActual: rows[i].qtyActual,
+          action: rows[i].action,
+        );
+        await _feedback.success();
+        notifyListeners();
+        return const Success(null);
+      },
+      orElse: (err) => Failure(err),
+    );
   }
 }

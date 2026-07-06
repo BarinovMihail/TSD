@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/network/api_error.dart';
+import '../../../core/presentation/confirm_dialog.dart';
 import '../../../core/scanner/keyboard_wedge_scanner.dart';
 import '../../../l10n/app_strings.dart';
 import '../../docs/application/completed_docs_provider.dart';
 import '../application/inventory_screen_controller.dart';
 import '../application/scan_controller.dart';
+import '../domain/barcode_info.dart';
 import '../domain/doc_table_row.dart';
 import 'row_card.dart';
 
@@ -61,39 +64,127 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
           backgroundColor: Theme.of(context).colorScheme.secondary,
           duration: const Duration(milliseconds: 800),
         ));
-      case NotFound():
-        _showNotFound(code);
+      case BarcodeNotRegistered():
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(AppStrings.barcodeNotRegistered(code)),
+          backgroundColor: Theme.of(context).colorScheme.error,
+          duration: const Duration(seconds: 2),
+        ));
+      case NotFoundInDocument():
+        // Номенклатура найдена в 1С, но не сопоставлена строке документа.
+        // Предлагаем добавить её через POST /newStr с парой (Номенклатура,
+        // Характеристика) из ответа /barcode/.
+        _showNotFound(code, outcome.info);
+      case LookupError():
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text(AppStrings.barcodeLookupNetworkError),
+          backgroundColor: Theme.of(context).colorScheme.error,
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+              label: AppStrings.retry, onPressed: () => _onCode(code)),
+        ));
       case Ambiguous():
         _showAmbiguous(outcome.candidates);
     }
   }
 
-  void _showNotFound(String code) {
+  /// Диалог «Добавить номенклатуру»: номенклатура найдена в 1С по штрихкоду,
+  /// но её нет в табличной части документа.
+  void _showNotFound(String code, BarcodeInfo info) {
     showDialog<void>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) {
-        final manualCtrl = TextEditingController();
         return AlertDialog(
-          title: Text(AppStrings.notFoundCode(code)),
-          content: TextField(
-            controller: manualCtrl,
-            decoration:
-                const InputDecoration(labelText: AppStrings.enterManually),
-          ),
+          title: Text(AppStrings.addNomenclatureQuestion(
+              code, info.nomenclature, info.characteristic)),
           actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text(AppStrings.cancel)),
-            ElevatedButton(
-              onPressed: () {
-                final v = manualCtrl.text.trim();
-                Navigator.pop(ctx);
-                if (v.isNotEmpty) _onCode(v);
-              },
-              child: const Text(AppStrings.confirm),
+            // Кнопки единым вертикальным стеком, как в ConfirmDialog.
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Primary — добавить номенклатуру через 1С (заполненная, сверху).
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(60),
+                    textStyle: const TextStyle(
+                        fontSize: 20, fontWeight: FontWeight.w700),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _addMissingLine(code, info);
+                  },
+                  child: const Text(AppStrings.addNomenclature),
+                ),
+                const SizedBox(height: 12),
+                // Secondary — отмена (outline, снизу).
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(56),
+                  ),
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text(AppStrings.cancel),
+                ),
+              ],
             ),
           ],
         );
+      },
+    );
+  }
+
+  /// Добавление номенклатуры в документ через 1С (POST /hs/inventory/newStr),
+  /// когда отсканированный код не найден. Успех → перезагрузка строк и факт = 1.
+  Future<void> _addMissingLine(String code, BarcodeInfo info) async {
+    final scan = _scan;
+    if (scan == null) return;
+    // Индикатор «Добавление…».
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showMaterialBanner(
+      MaterialBanner(
+        content: const Row(children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          SizedBox(width: 16),
+          Text(AppStrings.adding),
+        ]),
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+        actions: const [SizedBox.shrink()],
+      ),
+    );
+
+    final res = await scan.addMissingLine(info);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+
+    res.maybeWhen(
+      onValue: (_) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text(AppStrings.addNomenclatureSuccess),
+          backgroundColor: Colors.green,
+          duration: const Duration(milliseconds: 1200),
+        ));
+      },
+      orElse: (err) {
+        final msg = err is ParseError
+            ? AppStrings.addNomenclatureNotFound
+            : AppStrings.addNomenclatureError;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(msg),
+          action: SnackBarAction(
+              label: AppStrings.retry,
+              onPressed: () => _addMissingLine(code, info)),
+        ));
       },
     );
   }
@@ -122,9 +213,14 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
           ),
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text(AppStrings.cancel)),
+          // Отмена на всю ширину (outline) — единственное действие.
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(56),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text(AppStrings.cancel),
+          ),
         ],
       ),
     );
@@ -143,48 +239,52 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     if (scan == null) return;
     final hasDiscrepancies = scan.hasDiscrepancies;
     final fullyScanned = scan.isFullyScanned;
+
     // Приоритет: непросканировано → расхождения → всё ок.
-    final String title;
-    final String contentText;
-    final String confirmLabel;
+    final Widget title;
+    final Widget content;
+    final String sendLabel;
     if (!fullyScanned) {
       final left = scan.total - scan.scannedCount;
-      title = 'Отправить неполные результаты?';
-      contentText = 'Отсканировано ${scan.scannedCount} из ${scan.total} '
-          'позиций ($left не отсканировано). Отправить как есть?';
-      confirmLabel = 'Отправить неполное';
+      title = const Text('Отправить неполный результат?');
+      content = Text.rich(TextSpan(children: [
+        const TextSpan(text: 'Отсканировано '),
+        b('${scan.scannedCount}'),
+        const TextSpan(text: ' из '),
+        b('${scan.total}'),
+        const TextSpan(text: ' позиций, '),
+        b('$left'),
+        const TextSpan(text: ' не отсканировано.'),
+      ]));
+      sendLabel = 'Отправить неполное';
     } else if (hasDiscrepancies) {
-      title = 'Отправить результаты с расхождениями?';
-      contentText =
-          'По некоторым позициям фактическое количество не совпадает с учётом. '
-          'Результаты будут отправлены как есть.';
-      confirmLabel = 'Отправить с расхождением';
+      title = const Text('Отправить с расхождениями?');
+      content = const Text(
+          'Фактическое количество по некоторым позициям не совпадает с учётом.');
+      sendLabel = 'Отправить с расхождением';
     } else {
-      title = 'Завершить и отправить?';
-      contentText =
-          'Все позиции отсканированы без расхождений. Отправить результаты в 1С?';
-      confirmLabel = 'Отправить';
+      title = const Text('Завершить и отправить?');
+      content = const Text(
+          'Все позиции отсканированы без расхождений.');
+      sendLabel = 'Отправить';
     }
-    final ok = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text(title),
-            content: Text(contentText),
-            actionsAlignment: MainAxisAlignment.spaceBetween,
-            actionsOverflowAlignment: OverflowBarAlignment.center,
-            actionsOverflowButtonSpacing: 8,
-            actions: [
-              OutlinedButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Проверить ещё раз')),
-              ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: Text(confirmLabel)),
-            ],
-          ),
-        ) ??
-        false;
-    if (!ok) return;
+
+    await ConfirmDialog.show(
+      context,
+      title: title,
+      content: content,
+      // Безопасное действие — рекомендуемое (заполненная кнопка, сверху).
+      primaryLabel: 'Проверить ещё раз',
+      onPrimary: () {}, // просто закрыть диалог, ничего не отправлять
+      // Рискованное действие — отправка (outline, снизу).
+      secondaryLabel: sendLabel,
+      onSecondary: _doCommit,
+    );
+  }
+
+  Future<void> _doCommit() async {
+    final scan = _scan;
+    if (scan == null) return;
     final res = await scan.commit();
     if (!mounted) return;
     res.maybeWhen(

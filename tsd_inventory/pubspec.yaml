@@ -1,7 +1,7 @@
 name: tsd_inventory
-description: Инвентаризация ОС для терминала сбора данных M3 SL20.
+description: Инвентаризация ТМЦ для терминала сбора данных M3 SL20.
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ^3.12.2
@@ -25,6 +25,7 @@ dependencies:
   logging: ^1.2.0
   path_provider: ^2.1.0
   path: ^1.9.0
+  package_info_plus: ^8.0.0
 
 dev_dependencies:
   flutter_test:

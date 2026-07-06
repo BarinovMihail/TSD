@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/update/application/update_controller.dart';
+import '../../../core/update/presentation/update_dialog.dart';
 import '../../../l10n/app_strings.dart';
 import '../application/auth_controller.dart';
 
@@ -40,12 +42,42 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         }
       });
     });
+    // Проверка обновлений при входе (до авторизации — не требует учётки 1С).
+    _checkForUpdates();
   }
+
+  Future<void> _checkForUpdates() async {
+    final controller = ref.read(updateControllerProvider);
+    controller.addListener(_onUpdateStateChanged);
+    await controller.checkAndPrompt();
+  }
+
+  void _onUpdateStateChanged() {
+    final controller = ref.read(updateControllerProvider);
+    if (!mounted) return;
+    if (controller.hasUpdate && _updateDialogShown == false) {
+      _updateDialogShown = true;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => UpdateDialog(controller: controller),
+      ).then((_) {
+        // Диалог закрыли → слушатель больше не нужен.
+        if (mounted) {
+          controller.removeListener(_onUpdateStateChanged);
+        }
+      });
+    }
+  }
+
+  bool _updateDialogShown = false;
 
   @override
   void dispose() {
     _loginCtrl.dispose();
     _passCtrl.dispose();
+    // Слушатель обновлений мог остаться, если диалог не был показан.
+    ref.read(updateControllerProvider).removeListener(_onUpdateStateChanged);
     super.dispose();
   }
 

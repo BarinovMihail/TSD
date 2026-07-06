@@ -2,15 +2,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tsd_inventory/features/inventory/domain/barcode_matcher.dart';
 import 'package:tsd_inventory/features/inventory/domain/doc_table_row.dart';
 
-DocTableRow _row(int line, String code,
-        {String inv = '', String series = '', String nom = ''}) =>
+DocTableRow _row(int line,
+        {String nom = '', String char = '', String code = ''}) =>
     DocTableRow(
       lineNumber: line,
-      inventoryNumber: inv,
+      inventoryNumber: '',
       nomenclature: nom,
       nomenclatureCode: code,
-      characteristic: '',
-      series: series,
+      characteristic: char,
+      series: '',
       seriesStatus: '0',
       fio: '',
       qtyAccounting: 1,
@@ -19,70 +19,98 @@ DocTableRow _row(int line, String code,
     );
 
 void main() {
-  test('уникальное совпадение по НоменклатураКод', () {
-    final rows = [_row(1, '000123'), _row(2, '000456')];
-    final r = BarcodeMatcher().match('000123', rows);
-    expect(r.isUnique, true);
-    expect(r.exact.single.lineNumber, 1);
+  group('matchByNomenclatureCharacteristic', () {
+    test('уникальное совпадение по паре Номенклатура+Характеристика', () {
+      final rows = [
+        _row(1, nom: 'Монитор', char: '23,5" Samsung №CWGCH4ZR503628'),
+        _row(2, nom: 'Клавиатура', char: ''),
+      ];
+      final r = BarcodeMatcher().matchByNomenclatureCharacteristic(
+          'Монитор', '23,5" Samsung №CWGCH4ZR503628', rows);
+      expect(r.isUnique, true);
+      expect(r.exact.single.lineNumber, 1);
+    });
+
+    test('совпадение когда характеристика пустая у строки и у запроса', () {
+      final rows = [_row(1, nom: 'Клавиатура', char: '')];
+      final r = BarcodeMatcher().matchByNomenclatureCharacteristic(
+          'Клавиатура', '', rows);
+      expect(r.isUnique, true);
+      expect(r.exact.single.lineNumber, 1);
+    });
+
+    test('несколько строк с одинаковой парой → ambiguous', () {
+      final rows = [
+        _row(1, nom: 'Монитор', char: 'Black'),
+        _row(2, nom: 'Монитор', char: 'Black'), // дубль пары
+      ];
+      final r = BarcodeMatcher().matchByNomenclatureCharacteristic(
+          'Монитор', 'Black', rows);
+      expect(r.isAmbiguous, true);
+      expect(r.exact.length, 2);
+    });
+
+    test('разная характеристика → не совпадает', () {
+      final rows = [
+        _row(1, nom: 'Монитор', char: 'Black'),
+        _row(2, nom: 'Монитор', char: 'White'),
+      ];
+      final r = BarcodeMatcher()
+          .matchByNomenclatureCharacteristic('Монитор', 'White', rows);
+      expect(r.isUnique, true);
+      expect(r.exact.single.lineNumber, 2);
+    });
+
+    test('номенклатура есть, характеристика другая → none', () {
+      final rows = [_row(1, nom: 'Монитор', char: 'Black')];
+      final r = BarcodeMatcher()
+          .matchByNomenclatureCharacteristic('Монитор', 'White', rows);
+      expect(r.isNone, true);
+    });
+
+    test('нет такой номенклатуры → none', () {
+      final rows = [_row(1, nom: 'Монитор', char: '')];
+      final r = BarcodeMatcher()
+          .matchByNomenclatureCharacteristic('Принтер', '', rows);
+      expect(r.isNone, true);
+    });
+
+    test('пустая номенклатура в запросе → none', () {
+      final rows = [_row(1, nom: 'Монитор', char: '')];
+      expect(
+          BarcodeMatcher()
+              .matchByNomenclatureCharacteristic('', '', rows)
+              .isNone,
+          true);
+    });
+
+    test('нормализация: регистр не важен', () {
+      final rows = [_row(1, nom: 'Монитор', char: 'Black')];
+      expect(
+          BarcodeMatcher()
+              .matchByNomenclatureCharacteristic('МОНИТОР', 'BLACK', rows)
+              .isUnique,
+          true);
+    });
+
+    test('нормализация: лишние пробелы коллапсируются', () {
+      final rows = [_row(1, nom: 'Монитор 24', char: 'Black')];
+      expect(
+          BarcodeMatcher()
+              .matchByNomenclatureCharacteristic(
+                  '  Монитор   24 ', '  Black  ', rows)
+              .isUnique,
+          true);
+    });
   });
 
-  test('несколько совпадений → ambiguous', () {
-    final rows = [_row(1, '000123'), _row(2, '000123')];
-    final r = BarcodeMatcher().match('000123', rows);
-    expect(r.isAmbiguous, true);
-    expect(r.exact.length, 2);
-  });
+  group('normalizeCode (для addMissingLine)', () {
+    test('восклицательные знаки → пробелы, trim', () {
+      expect(BarcodeMatcher().normalizeCode('618810!!!!!'), '618810');
+    });
 
-  test('нет совпадений → none', () {
-    final rows = [_row(1, '000123')];
-    expect(BarcodeMatcher().match('999', rows).isNone, true);
-  });
-
-  test('пустой код → none', () {
-    final rows = [_row(1, '000123')];
-    expect(BarcodeMatcher().match('   ', rows).isNone, true);
-  });
-
-  test('fallback на ИнвентарныйНомер ТОЛЬКО если НоменклатураКод пуст у всех', () {
-    final rows = [_row(1, '', inv: '44182'), _row(2, '', inv: '44183')];
-    final r = BarcodeMatcher().match('44182', rows);
-    expect(r.isUnique, true);
-    expect(r.exact.single.lineNumber, 1);
-  });
-
-  test('fallback НЕ срабатывает, если хотя бы у одной строки есть НоменклатураКод',
-      () {
-    final rows = [_row(1, '000123'), _row(2, '', inv: '44183')];
-    final r = BarcodeMatcher().match('44183', rows);
-    expect(r.isNone, true); // fallback отключён, т.к. есть строка с кодом
-  });
-
-  test('fallback на Серию когда все коды пусты', () {
-    final rows = [_row(1, '', series: 'SR-1'), _row(2, '', series: 'SR-2')];
-    final r = BarcodeMatcher().match('SR-2', rows);
-    expect(r.isUnique, true);
-    expect(r.exact.single.lineNumber, 2);
-  });
-
-  test('normalize: trim пробелов', () {
-    final rows = [_row(1, '000123')];
-    expect(BarcodeMatcher().match('  000123  ', rows).isUnique, true);
-  });
-
-  test('восклицательные знаки в отсканированном коде заменяются на пробел', () {
-    // Сканер шлёт «618810!!!!!!»; в 1С код хранится без добивки.
-    final rows = [_row(1, '618810'), _row(2, '000456')];
-    expect(BarcodeMatcher().match('618810!!!!!!', rows).isUnique, true);
-    expect(BarcodeMatcher().match('618810!!!!!!', rows).exact.single.lineNumber,
-        1);
-  });
-
-  test('trailing-пробелы игнорируются при сравнении', () {
-    // Отсканировано с добивкой, в 1С — без неё (и наоборот).
-    final rows = [_row(1, '000123')];
-    expect(
-        BarcodeMatcher().match('000123      ', rows).isUnique, true); // скан
-    final rows2 = [_row(1, '000123      ')]; // 1С с фиксированной шириной
-    expect(BarcodeMatcher().match('000123', rows2).isUnique, true);
+    test('trailing пробелы убираются', () {
+      expect(BarcodeMatcher().normalizeCode('000123      '), '000123');
+    });
   });
 }

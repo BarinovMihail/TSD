@@ -11,7 +11,7 @@ abstract final class AppStrings {
   static const no = 'Нет';
 
   // Авторизация
-  static const loginTitle = 'Инвентаризация ОС';
+  static const loginTitle = 'Инвентаризация ТМЦ';
   static const loginField = 'Логин';
   static const passwordField = 'Пароль';
   static const showPassword = 'Показать пароль';
@@ -59,4 +59,36 @@ abstract final class AppStrings {
       'расхождение: факт $actual, учёт $accounting';
   static String notFoundCode(String code) => 'Штрихкод $code не найден в документе';
   static String errServerCode(int code) => 'Ошибка сервера. Код: $code';
+
+  // Контроль версий / автообновление
+  static String updateAvailableTitle(String version) =>
+      'Доступна новая версия $version';
+  static const updateNow = 'Обновить';
+  static const skipUpdate = 'Пропустить';
+  static const downloadingUpdate = 'Скачивание обновления…';
+  static String updatePercent(int p) => '$p%';
+  static const updateDownloadError = 'Не удалось скачать обновление';
+  static const updateInstallError = 'Не удалось запустить установку';
+  static const updateInstallingReady = 'Подтвердите установку в системном диалоге';
+
+  // Сканирование: сообщения по штрихкоду
+  static String barcodeNotRegistered(String code) =>
+      'Штрихкод $code не зарегистрирован в 1С';
+  static String notFoundInDocByBarcode(String code, String nomenclature) =>
+      'Номенклатура «$nomenclature» (штрихкод $code) не найдена в документе';
+  static const barcodeLookupNetworkError =
+      'Нет связи с сервером. Проверьте Wi-Fi';
+
+  // Добавление номенклатуры при «не найдено»
+  static String addNomenclatureQuestion(
+          String code, String nomenclature, String characteristic) =>
+      'Номенклатура «$nomenclature»'
+      '${characteristic.isEmpty ? '' : ' ($characteristic)'}'
+      ' (штрихкод $code) не найдена в документе. Добавить?';
+  static const addNomenclature = 'Добавить номенклатуру';
+  static const addNomenclatureSuccess = 'Номенклатура добавлена';
+  static const addNomenclatureError = 'Не удалось добавить. Повторить?';
+  static const addNomenclatureNotFound =
+      'Строка не вернулась из 1С после добавления';
+  static const adding = 'Добавление…';
 }

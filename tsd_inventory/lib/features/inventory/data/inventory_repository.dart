@@ -7,6 +7,7 @@ import 'package:tsd_inventory/core/network/dio_client.dart';
 import 'package:tsd_inventory/core/result/result.dart';
 import 'package:tsd_inventory/core/storage/app_database.dart';
 
+import '../domain/barcode_info.dart';
 import '../domain/doc_table_parser.dart';
 import '../domain/doc_table_row.dart';
 
@@ -24,6 +25,33 @@ class InventoryRepository {
 
   final DioClient _client;
   final AppDatabase _db;
+
+  /// GET /hs/inventory/barcode/{Код} → номенклатура и характеристика по штрихкоду
+  /// из регистра сведений. 1С возвращает плоский объект:
+  ///   { "Номенклатура": "Монитор", "Характеристика": "23,5\" Samsung №…" }
+  /// Если штрихкод не зарегистрирован в 1С — пустой объект {} → Success(null).
+  /// Сетевая/серверная ошибка → Failure(ApiError).
+  Future<Result<BarcodeInfo?>> getBarcodeInfo(String code) async {
+    final path = 'hs/inventory/barcode/${Uri.encodeComponent(code)}';
+    try {
+      final res = await _client.getJson<dynamic>(path);
+      final data = res.data is String ? jsonDecode(res.data as String) : res.data;
+      if (data is! Map || data.isEmpty) {
+        // Штрихкод не зарегистрирован в 1С (пустой ответ {}).
+        return const Success(null);
+      }
+      final nom = data['Номенклатура']?.toString() ?? '';
+      final char = data['Характеристика']?.toString() ?? '';
+      // На пустую номенклатуру тоже реагируем как «не зарегистрирован».
+      if (nom.trim().isEmpty) return const Success(null);
+      return Success(BarcodeInfo(nomenclature: nom, characteristic: char));
+    } on DioException catch (e) {
+      return Failure(ApiError.fromDio(e));
+    } catch (e) {
+      _log.warning('Ошибка получения данных штрихкода: $e');
+      return const Failure(ParseError('Не удалось разобрать ответ штрихкода'));
+    }
+  }
 
   /// GET /hs/inventory/code/{Код} → табличная часть.
   /// Сетевая ошибка + есть кэш → отдаём кэш (офлайн).
@@ -78,6 +106,37 @@ class InventoryRepository {
       return Failure(ApiError.fromDio(e));
     } catch (e) {
       _log.warning('Ошибка записи результатов: $e');
+      return const Failure(NetworkError());
+    }
+  }
+
+  /// Добавление новой строки в табличную часть документа 1С.
+  /// Вызывается, когда отсканированный штрихкод не найден среди строк документа,
+  /// и пользователь подтвердил добавление.
+  /// POST /hs/inventory/newStr
+  ///   тело: {
+  ///     "НомерДокумента": "<код документа>",
+  ///     "Номенклатура": "<наименование номенклатуры>",
+  ///     "Характеристика": "<характеристика>"
+  ///   }
+  Future<Result<void>> addNewLine(
+    String docCode,
+    String nomenclature,
+    String characteristic,
+  ) async {
+    const path = 'hs/inventory/newStr';
+    final body = {
+      'НомерДокумента': docCode,
+      'Номенклатура': nomenclature,
+      'Характеристика': characteristic,
+    };
+    try {
+      await _client.postJson<dynamic>(path, body: body);
+      return const Success(null);
+    } on DioException catch (e) {
+      return Failure(ApiError.fromDio(e));
+    } catch (e) {
+      _log.warning('Ошибка добавления строки: $e');
       return const Failure(NetworkError());
     }
   }
