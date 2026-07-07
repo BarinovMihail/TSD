@@ -6,7 +6,8 @@ class AppConfig {
     this.scannerMode = ScannerMode.keyboardWedge,
     this.connectTimeoutSec = 10,
     this.receiveTimeoutSec = 30,
-    this.updateManifestUrl = '',
+    this.updateManifestUrl =
+        'https://raw.githubusercontent.com/BarinovMihail/Test/main/manifest.json',
   });
 
   /// Базовый URL HTTP-сервисов 1С (без /hs/...).
@@ -16,8 +17,9 @@ class AppConfig {
   final int receiveTimeoutSec;
 
   /// URL JSON-манифеста версий для автообновления.
-  /// Пусто (по умолчанию) → фича выключена, проверка не идёт.
-  /// Заполнить, когда определится хостинг (см. README «Контроль версий»).
+  /// По умолчанию — raw-ссылка на манифест в репозитории дистрибуции
+  /// (github.com/BarinovMihail/Test). Пусто → фича выключена.
+  /// См. README «Контроль версий».
   final String updateManifestUrl;
 
   /// Конструирует полный путь: baseUrl + '/hs/inventory/' + path.
