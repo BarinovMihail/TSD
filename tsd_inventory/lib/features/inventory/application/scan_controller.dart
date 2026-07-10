@@ -148,6 +148,32 @@ class ScanController extends ChangeNotifier {
     rows[i] = rows[i].copyWith(qtyActual: rows[i].qtyActual + 1);
   }
 
+  /// Установить факт строки в [value] (с защитой от отрицательных) и сохранить.
+  /// Переиспользуется для декремента и полного сброса факта сканирования.
+  Future<void> _setActual(DocTableRow row, int value) async {
+    final v = value < 0 ? 0 : value;
+    final i = rows.indexWhere((r) => r.lineNumber == row.lineNumber);
+    if (i == -1) return;
+    rows[i] = rows[i].copyWith(qtyActual: v);
+    await _db.upsertScanProgress(
+      docCode: docCode,
+      lineNo: rows[i].lineNumber,
+      nomenclatureCode: rows[i].nomenclatureCode,
+      qtyActual: rows[i].qtyActual,
+      action: rows[i].action,
+    );
+    notifyListeners();
+  }
+
+  /// Убрать одну единицу из факта (не уходит ниже 0).
+  /// Вызывается при долгом нажатии на отсканированной позиции.
+  Future<void> decrementActual(DocTableRow row) =>
+      _setActual(row, row.qtyActual - 1);
+
+  /// Сбросить факт сканирования позиции в 0 (позиция становится
+  /// «не отсканирована»). Запись прогресса остаётся в БД с qtyActual = 0.
+  Future<void> resetActual(DocTableRow row) => _setActual(row, 0);
+
   /// Восстановление прогресса из БД при входе на экран.
   Future<void> hydrateFromDb() async {
     final saved = await _db.getScanProgress(docCode);

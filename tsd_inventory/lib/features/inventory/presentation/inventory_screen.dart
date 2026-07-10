@@ -234,6 +234,87 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     return char.isEmpty ? inv : '$inv | $char';
   }
 
+  /// Диалог снятия факта сканирования позиции (долгое нажатие по карточке,
+  /// где факт > 0): убрать единицу (−1) или сбросить факт (=0).
+  void _showUnscanDialog(DocTableRow row) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
+        return AlertDialog(
+          title: Text(AppStrings.unscanTitle),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(row.nomenclature,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              if (row.characteristic.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(row.characteristic,
+                      style: TextStyle(color: scheme.outline)),
+                ),
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  AppStrings.qtyActualOf(row.qtyActual),
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Primary (безопасное) — убрать одну единицу (заполненная, сверху).
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(60),
+                    textStyle: const TextStyle(
+                        fontSize: 20, fontWeight: FontWeight.w700),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _scan?.decrementActual(row);
+                  },
+                  child: const Text(AppStrings.unscanDecrement),
+                ),
+                const SizedBox(height: 12),
+                // Деструктивное — сброс факта в 0 (outline, красная).
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(56),
+                    foregroundColor: scheme.error,
+                    side: BorderSide(color: scheme.error),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _scan?.resetActual(row);
+                  },
+                  child: const Text(AppStrings.unscanReset),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(56),
+                  ),
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text(AppStrings.cancel),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _finish() async {
     final scan = _scan;
     if (scan == null) return;
@@ -327,7 +408,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                   focusNode: _scanFocus,
                   onKeyEvent: _scanner.handleKeyEvent,
                   autofocus: true,
-                  child: _Body(ctrl: ctrl),
+                  child: _Body(ctrl: ctrl, onUnscan: _showUnscanDialog),
                 ),
       bottomNavigationBar: SafeArea(
         child: Padding(
@@ -344,8 +425,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
 }
 
 class _Body extends ConsumerWidget {
-  const _Body({required this.ctrl});
+  const _Body({required this.ctrl, required this.onUnscan});
   final InventoryScreenController ctrl;
+
+  /// Долгое нажатие по отсканированной позиции → диалог снятия факта.
+  final void Function(DocTableRow row) onUnscan;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -415,9 +499,13 @@ class _Body extends ConsumerWidget {
         Expanded(
           child: RefreshIndicator(
             onRefresh: ctrl.reload,
-            child: ListView.builder(
+              child: ListView.builder(
               itemCount: rows.length,
-              itemBuilder: (context, i) => RowCard(row: rows[i]),
+              itemBuilder: (context, i) => RowCard(
+                row: rows[i],
+                // Long-press доступен только для отсканированных позиций.
+                onLongPress: rows[i].isFound ? () => onUnscan(rows[i]) : null,
+              ),
             ),
           ),
         ),

@@ -91,4 +91,9 @@ abstract final class AppStrings {
   static const addNomenclatureNotFound =
       'Строка не вернулась из 1С после добавления';
   static const adding = 'Добавление…';
+
+  // Снятие факта сканирования (долгое нажатие на отсканированной позиции)
+  static const unscanTitle = 'Управление фактом';
+  static const unscanDecrement = 'Убрать единицу (−1)';
+  static const unscanReset = 'Сбросить факт (=0)';
 }

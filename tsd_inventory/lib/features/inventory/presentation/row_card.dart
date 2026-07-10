@@ -4,8 +4,12 @@ import '../../../l10n/app_strings.dart';
 import '../domain/doc_table_row.dart';
 
 class RowCard extends StatelessWidget {
-  const RowCard({super.key, required this.row});
+  const RowCard({super.key, required this.row, this.onLongPress});
   final DocTableRow row;
+
+  /// Долгое нажатие на карточке (например, для снятия факта сканирования).
+  /// null → карточка не реагирует на нажатия.
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -17,7 +21,7 @@ class RowCard extends StatelessWidget {
         ? scheme.secondaryContainer
         : scheme.surfaceContainerHighest;
 
-    return Card(
+    final card = Card(
       color: bg,
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -84,6 +88,15 @@ class RowCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+
+    // Long-press включается только когда передан колбэк (например, на
+    // отсканированных позициях — для снятия факта).
+    if (onLongPress == null) return card;
+    return GestureDetector(
+      onLongPress: onLongPress,
+      behavior: HitTestBehavior.opaque,
+      child: card,
     );
   }
 }

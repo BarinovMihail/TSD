@@ -84,11 +84,34 @@ URL манифеста задаётся в `lib/core/config/app_config.dart` (п
 - `REQUEST_INSTALL_PACKAGES` — запуск системного установщика.
 - `FileProvider` (`res/xml/file_paths.xml`) — безопасная передача APK установщику.
 
-> **Подпись.** APK, распространяемый через автообновление, должен быть подписан
-> **тем же ключом**, что и установленное приложение. Сейчас release-сборка
-> подписана debug-ключом (`build.gradle.kts`, TODO), поэтому автообновление
-> работает только между debug-подписанными сборками. Для production нужен
-> стабильный release-keystore.
+> **Подпись release-сборки.** APK, распространяемый через автообновление, должен
+> быть подписан **тем же ключом**, что и установленное приложение, иначе Android
+> отклонит обновление. Release-keystore подключается через `android/key.properties`
+> (файл **не коммитится**, см. `android/.gitignore`).
+>
+> **Создание keystore (один раз):**
+> ```bash
+> keytool -genkey -v -keystore android/app/release.keystore.jks \
+>   -alias tsd -keyalg RSA -keysize 2048 -validity 10000 \
+>   -storepass <пароль_хранилища> -keypass <пароль_ключа> \
+>   -dname "CN=Inventory TSD, O=TSD, C=RU"
+> ```
+>
+> **Файл `android/key.properties`:**
+> ```properties
+> storePassword=<пароль_хранилища>
+> keyPassword=<пароль_ключа>
+> keyAlias=tsd
+> storeFile=release.keystore.jks
+> ```
+> `storeFile` указан относительно `android/app/`. При отсутствии `key.properties`
+> release-сборка подписывается debug-ключом (только для локальной разработки —
+> автообновление между debug-сборками работает).
+>
+> ⚠️ **Сделай резервную копию keystore** и паролей. Утеря ключа означает, что
+> обновить уже установленное приложение будет невозможно — только снос и установка
+> заново под другим ключом (данные drift-БД при этом сохранятся, т.к. путь не
+> зависит от подписи, но пользователю придётся переустанавливать APK вручную).
 
 ## Тесты
 
