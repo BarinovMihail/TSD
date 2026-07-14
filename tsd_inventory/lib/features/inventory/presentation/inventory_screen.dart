@@ -318,26 +318,53 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   Future<void> _finish() async {
     final scan = _scan;
     if (scan == null) return;
-    final hasDiscrepancies = scan.hasDiscrepancies;
+    // Нельзя завершить, если не отсканировано ни одной позиции.
+    if (scan.scannedCount == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Сначала отсканируйте хотя бы одну позицию')));
+      return;
+    }
     final fullyScanned = scan.isFullyScanned;
+    // Расхождения считаем по отсканированным позициям (факт ≠ учёту).
+    final hasDiscrepancies = scan.hasDiscrepancies;
+    final discrepancyCount = scan.scannedDiscrepancyCount;
 
-    // Приоритет: непросканировано → расхождения → всё ок.
+    // Приоритет: непросканировано (с учётом расхождений) → расхождения → всё ок.
     final Widget title;
     final Widget content;
     final String sendLabel;
     if (!fullyScanned) {
       final left = scan.total - scan.scannedCount;
-      title = const Text('Отправить неполный результат?');
-      content = Text.rich(TextSpan(children: [
-        const TextSpan(text: 'Отсканировано '),
-        b('${scan.scannedCount}'),
-        const TextSpan(text: ' из '),
-        b('${scan.total}'),
-        const TextSpan(text: ' позиций, '),
-        b('$left'),
-        const TextSpan(text: ' не отсканировано.'),
-      ]));
-      sendLabel = 'Отправить неполное';
+      if (discrepancyCount > 0) {
+        // Неполный список, но по отсканированным позициям есть расхождения.
+        title = const Text('Отправить неполный результат с расхождениями?');
+        content = Text.rich(TextSpan(children: [
+          const TextSpan(text: 'Отсканировано '),
+          b('${scan.scannedCount}'),
+          const TextSpan(text: ' из '),
+          b('${scan.total}'),
+          const TextSpan(text: ' позиций, '),
+          b('$left'),
+          const TextSpan(text: ' не отсканировано.\n'),
+          const TextSpan(text: 'По '),
+          b('$discrepancyCount'),
+          const TextSpan(
+              text: ' отсканированным позициям факт не совпадает с учётом.'),
+        ]));
+        sendLabel = 'Отправить неполное с расхождением';
+      } else {
+        title = const Text('Отправить неполный результат?');
+        content = Text.rich(TextSpan(children: [
+          const TextSpan(text: 'Отсканировано '),
+          b('${scan.scannedCount}'),
+          const TextSpan(text: ' из '),
+          b('${scan.total}'),
+          const TextSpan(text: ' позиций, '),
+          b('$left'),
+          const TextSpan(text: ' не отсканировано.'),
+        ]));
+        sendLabel = 'Отправить неполное';
+      }
     } else if (hasDiscrepancies) {
       title = const Text('Отправить с расхождениями?');
       content = const Text(
@@ -414,7 +441,9 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: ElevatedButton(
-            onPressed: _finish,
+            // Кнопка отключена, пока не отсканировано ни одной позиции.
+            onPressed:
+                (ctrl.scan?.scannedCount ?? 0) > 0 ? _finish : null,
             child: Text(
                 '${AppStrings.finish} (${ctrl.scan?.scannedCount ?? 0}/${ctrl.scan?.total ?? 0})'),
           ),

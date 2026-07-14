@@ -75,6 +75,12 @@ class ScanController extends ChangeNotifier {
   /// Есть ли хоть одна строка с расхождением (факт ≠ учёту).
   bool get hasDiscrepancies => rows.any((r) => r.hasDiscrepancy);
 
+  /// Число отсканированных позиций с расхождением (факт ≠ учёту).
+  /// Учитываются только отсканированные строки (факт > 0), чтобы не
+  /// считать за расхождения ещё не отсканированные позиции.
+  int get scannedDiscrepancyCount =>
+      rows.where((r) => r.isFound && r.hasDiscrepancy).length;
+
   /// Все ли позиции отсканированы (факт > 0 у каждой строки).
   bool get isFullyScanned => rows.isNotEmpty && scannedCount == total;
 
