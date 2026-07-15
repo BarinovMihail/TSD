@@ -108,7 +108,7 @@ class UpdateController extends ChangeNotifier {
     state = const UpdateDownloading(null);
     notifyListeners();
 
-    final res = await _repo.downloadApk(manifest.apkUrl, onProgress: (r, t) {
+    final res = await _repo.downloadApk(manifest.resolvedApkUrl, onProgress: (r, t) {
       final p = t > 0 ? r / t : null;
       state = UpdateDownloading(p);
       notifyListeners();

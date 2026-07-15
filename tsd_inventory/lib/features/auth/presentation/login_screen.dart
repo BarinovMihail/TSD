@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/network/api_error.dart';
+import '../../../core/presentation/confirm_dialog.dart';
 import '../../../core/update/application/update_controller.dart';
 import '../../../core/update/presentation/update_dialog.dart';
 import '../../../l10n/app_strings.dart';
@@ -25,25 +27,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    // Восстановить сохранённые логин/пароль и состояние чекбоксов (если были).
-    Future(() async {
-      final store = ref.read(secureCredentialsStoreProvider);
-      final login = await store.readLogin();
-      final password = await store.readPassword();
-      if (!mounted) return;
-      setState(() {
-        if (login != null) _loginCtrl.text = login;
-        // «Запомнить логин» включён, если логин сохранён.
-        _rememberLogin = login != null;
-        if (password != null) {
-          _passCtrl.text = password;
-          // Пароль сохранён → чекбокс «запомнить пароль» был включён.
-          _rememberPassword = true;
-        }
-      });
-    });
+    // Восстановить сохранённые логин/пароль для активной базы и состояние чекбоксов.
+    _restoreSavedCredentials();
     // Проверка обновлений при входе (до авторизации — не требует учётки 1С).
     _checkForUpdates();
+  }
+
+  Future<void> _restoreSavedCredentials() async {
+    final store = ref.read(secureCredentialsStoreProvider);
+    final key = ref.read(appConfigProvider).storageKey;
+    final login = await store.readLogin(key);
+    final password = await store.readPassword(key);
+    if (!mounted) return;
+    setState(() {
+      if (login != null) _loginCtrl.text = login;
+      // «Запомнить логин» включён, если логин сохранён.
+      _rememberLogin = login != null;
+      if (password != null) {
+        _passCtrl.text = password;
+        // Пароль сохранён → чекбокс «запомнить пароль» был включён.
+        _rememberPassword = true;
+      }
+    });
   }
 
   Future<void> _checkForUpdates() async {
@@ -98,12 +103,60 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!mounted) return;
     if (err == null) {
       context.go('/docs');
+      return;
+    }
+    // Сетевая ошибка → предложить fallback на локальную базу ERP_Local.
+    // Прочие ошибки (401/403, 5xx) — показать текстом, как раньше.
+    if (err is NetworkError) {
+      setState(() => _loading = false);
+      _promptUseLocalBase();
     } else {
       setState(() {
-        _error = err;
+        _error = err.userMessage;
         _loading = false;
       });
     }
+  }
+
+  /// Диалог: удалённая база ERP недоступна — подключиться к ERP_Local?
+  /// При согласии подставляем сохранённые для ERP_Local логин/пароль
+  /// (они могут отличаться от учётки ERP) и повторяем вход.
+  void _promptUseLocalBase() {
+    ConfirmDialog.show(
+      context,
+      title: const Text(AppStrings.errRemoteUnreachableTitle),
+      content: const Text(AppStrings.errRemoteUnreachableBody),
+      primaryLabel: AppStrings.retryRemote,
+      onPrimary: () {
+        // Остаться на ERP — пользователь поправит сеть/данные и повторит.
+      },
+      secondaryLabel: AppStrings.useLocalBase,
+      onSecondary: () {
+        ref.read(authControllerProvider.notifier).useLocalBase();
+        _switchedToBaseCredentials().then((_) => _submit());
+      },
+    );
+  }
+
+  /// После переключения базы — подставить сохранённые для неё логин/пароль,
+  /// т.к. учётки ERP и ERP_Local могут различаться. Если для новой базы ничего
+  /// не сохранено — оставляем введённые поля как есть.
+  Future<void> _switchedToBaseCredentials() async {
+    final store = ref.read(secureCredentialsStoreProvider);
+    final key = ref.read(appConfigProvider).storageKey;
+    final login = await store.readLogin(key);
+    final password = await store.readPassword(key);
+    if (!mounted) return;
+    setState(() {
+      if (login != null) {
+        _loginCtrl.text = login;
+        _rememberLogin = true;
+      }
+      if (password != null) {
+        _passCtrl.text = password;
+        _rememberPassword = true;
+      }
+    });
   }
 
   @override

@@ -1,5 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tsd_inventory/core/config/app_config.dart';
+import 'package:tsd_inventory/core/network/api_error.dart';
+import 'package:tsd_inventory/core/network/dio_client.dart';
+import 'package:tsd_inventory/core/result/result.dart';
 import 'package:tsd_inventory/core/storage/secure_credentials_store.dart';
 
 import '../data/auth_repository.dart';
@@ -42,28 +45,38 @@ class AuthController extends Notifier<AuthState> {
   @override
   AuthState build() => const AuthState();
 
-  late final _repo = AuthRepository(ref.watch(appConfigProvider));
-  late final _store = ref.watch(secureCredentialsStoreProvider);
+  SecureCredentialsStore get _store => ref.read(secureCredentialsStoreProvider);
 
-  /// Попытка входа. Возвращает null при успехе, сообщение об ошибке при провале.
-  Future<String?> login(
+  /// Репозиторий всегда строится из *текущего* конфига — чтобы при переключении
+  /// базы (ERP ↔ ERP_Local) следующий логин шёл уже на выбранную базу.
+  AuthRepository _repo() => AuthRepository(ref.read(appConfigProvider));
+
+  /// Ключ активной базы ('erp' / 'erp_local') — учётные данные хранятся раздельно,
+  /// т.к. пароли на ERP и ERP_Local могут отличаться.
+  String get _storageKey => ref.read(appConfigProvider).storageKey;
+
+  /// Попытка входа. Возвращает null при успехе, [ApiError] при провале.
+  /// UI различает [NetworkError] (→ предложить ERP_Local) от остальных ошибок.
+  Future<ApiError?> login(
     String login,
     String password, {
     required bool rememberLogin,
     required bool rememberPassword,
   }) async {
-    final res = await _repo.login(login, password);
-    return res.maybeWhen(
-      onValue: (_) async {
+    final res = await _repo().login(login, password);
+    switch (res) {
+      case Success<String>():
+        // Сохраняем под ключ активной базы — пароль другой базы не затираем.
+        final key = _storageKey;
         if (rememberLogin) {
-          await _store.writeLogin(login);
+          await _store.writeLogin(key, login);
         } else {
-          await _store.removeLogin();
+          await _store.removeLogin(key);
         }
         if (rememberPassword) {
-          await _store.writePassword(password);
+          await _store.writePassword(key, password);
         } else {
-          await _store.removePassword();
+          await _store.removePassword(key);
         }
         state = AuthState(
           session: AuthSession(login: login, password: password),
@@ -71,13 +84,22 @@ class AuthController extends Notifier<AuthState> {
           rememberPassword: rememberPassword,
         );
         return null; // успех
-      },
-      orElse: (err) => err.userMessage,
-    );
+      case Failure<String>(:final error):
+        return error;
+    }
+  }
+
+  /// Переключиться на локальную базу ERP_Local (fallback при недоступности ERP).
+  void useLocalBase() {
+    ref.read(connectionTargetProvider.notifier).state = AppConfig.localUrl;
   }
 
   Future<void> logout() async {
     await _store.clear();
+    // Выбор ERP_Local — только до конца сессии: при выходе возвращаем ERP.
+    ref.read(connectionTargetProvider.notifier).state = AppConfig.remoteUrl;
+    // Сбрасываем запомненный рабочий хост ERP — новый вход снова начнёт с db-srv14.
+    DioClient.resetActiveHost();
     state = const AuthState();
   }
 }
@@ -85,7 +107,20 @@ class AuthController extends Notifier<AuthState> {
 final authControllerProvider =
     NotifierProvider<AuthController, AuthState>(AuthController.new);
 
-// --- Провайдеры зависимостей core (общие, определим здесь при первом использовании) ---
-final appConfigProvider = Provider<AppConfig>((ref) => const AppConfig());
+// --- Провайдеры зависимостей core (общие) ---
+
+/// Выбранная база подключения: ERP (db-srv14, по умолчанию) или ERP_Local
+/// (fallback при недоступности ERP). Действует до конца сессии — при выходе
+/// сбрасывается на [AppConfig.remoteUrl] в [AuthController.logout].
+final connectionTargetProvider =
+    StateProvider<String>((ref) => AppConfig.remoteUrl);
+
+/// Конфиг приложения с URL выбранной базы. Все репозитории/экраны получают
+/// адрес отсюда — переключение базы меняет URL во всём приложении автоматически.
+final appConfigProvider = Provider<AppConfig>((ref) {
+  final baseUrl = ref.watch(connectionTargetProvider);
+  return AppConfig(baseUrl: baseUrl);
+});
+
 final secureCredentialsStoreProvider =
     Provider<SecureCredentialsStore>((ref) => SecureCredentialsStore());

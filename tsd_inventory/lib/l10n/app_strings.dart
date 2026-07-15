@@ -23,6 +23,12 @@ abstract final class AppStrings {
   static const errAuthFailed = 'Неверный логин или пароль';
   static const errNetwork = 'Нет связи с сервером. Проверьте Wi-Fi';
   static const errGeneric = 'Произошла ошибка. Попробуйте ещё раз';
+  // Недоступность удалённой базы ERP при логине → выбор локальной базы.
+  static const errRemoteUnreachableTitle = 'Нет связи с удалённой базой ERP';
+  static const errRemoteUnreachableBody =
+      'Удалённая база ERP недоступна. Подключиться к локальной базе (ERP_Local)?';
+  static const useLocalBase = 'Подключиться к ERP_Local';
+  static const retryRemote = 'Повторить';
 
   // Список документов
   static const docsTitle = 'Документы инвентаризации';

@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:tsd_inventory/core/config/app_config.dart';
 import 'package:tsd_inventory/core/network/dio_client.dart';
 import 'package:tsd_inventory/core/storage/app_database.dart';
 import 'package:tsd_inventory/features/auth/application/auth_controller.dart';

@@ -29,19 +29,52 @@ flutter build apk --release
 
 ## Настройка адреса сервера 1С
 
-Базовый URL задаётся в `lib/core/config/app_config.dart` (поле `baseUrl`):
+Базовый URL задаётся в `lib/core/config/app_config.dart` (поле `baseUrl`).
+По умолчанию приложение подключается к **удалённой базе ERP** на сервере
+`db-srv14` (сервис опубликован как `erp`).
 
 ```dart
-const AppConfig({
-  this.baseUrl = 'http://10.0.2.2/ERP_Local',   // ← заменить на свой
-  ...
-});
+class AppConfig {
+  const AppConfig({
+    this.baseUrl = remoteUrl,   // = http://db-srv14/erp/ — db-srv14
+    ...
+  });
+
+  static const remoteUrl         = 'http://db-srv14/erp/';        // основной (hostname)
+  static const remoteUrlFallback = 'http://192.168.1.212/erp/';   // резервный (IP)
+  static const remoteHosts = [remoteUrl, remoteUrlFallback];      // для failover
+  static const localUrl    = 'http://192.168.1.51/ERP_Local/';    // fallback-база
+}
 ```
 
-- **Эмулятор:** `http://10.0.2.2/ERP_Local` (10.0.2.2 → localhost хоста).
-- **Реальный ТСД:** IP сервера 1С в локальной сети, напр. `http://192.168.1.10/ERP_Local`.
+- **ERP основной:** `http://db-srv14/erp/` (hostname сервера).
+- **ERP резервный:** `http://192.168.1.212/erp/` (IP того же сервера).
+- **ERP_Local (fallback-база):** `http://192.168.1.51/ERP_Local/`.
+- **Эмулятор:** заменить хост на `10.0.2.2` (→ localhost хоста).
+- **Реальный ТСД:** адрес сервера 1С в локальной сети.
 - HTTP (cleartext) разрешён через `android:usesCleartextTraffic` +
   `network_security_config.xml`.
+
+### Failover по адресам ERP
+
+Запросы к ERP идут по списку `remoteHosts` (основной `db-srv14` + резервный
+`192.168.1.212`). При сетевой ошибке или тайм-ауте на текущем адресе клиент
+автоматически переключается на следующий и повторяет запрос. Рабочий адрес
+запоминается и переиспользуется, чтобы не ждать тайм-аут на мёртвом хосте
+каждый раз.
+
+**Важно:** переключение происходит только при отсутствии связи
+(connection timeout / connection error). При любом HTTP-ответе сервера
+(401/403/404/5xx) адрес НЕ меняется — это реальная проблема учётной записи или
+публикации сервиса, маскировать её переключением адреса нельзя.
+
+### Fallback на локальную базу
+
+При логине приложение сначала стучится к **ERP**. Если удалённая база недоступна
+(нет связи), оператору предлагается диалог: подключиться к локальной базе
+**ERP_Local** или остаться на ERP и повторить. Выбор действует до конца сессии —
+при выходе снова по умолчанию ERP. Переключение меняет URL во всём приложении
+автоматически (через Riverpod `appConfigProvider`).
 
 ## Режим сканера
 

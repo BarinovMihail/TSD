@@ -5,7 +5,9 @@ import 'package:dio/dio.dart';
 import 'package:logging/logging.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:tsd_inventory/core/config/app_config.dart';
 import 'package:tsd_inventory/core/network/api_error.dart';
+import 'package:tsd_inventory/core/network/dio_client.dart';
 import 'package:tsd_inventory/core/result/result.dart';
 
 import '../domain/version_manifest.dart';
@@ -15,15 +17,26 @@ final _log = Logger('update_repository');
 /// Колбэк прогресса скачивания APK: (полученоБайт, всегоБайт).
 typedef DownloadProgress = void Function(int received, int total);
 
-/// Получение манифеста версий и скачивание APK.
+/// Получение манифеста версий и скачивание APK с портала internal.
 ///
-/// Использует **отдельный [Dio]** без Basic-авторизации: проверка обновлений
-/// идёт до входа пользователя в приложение, учётки 1С ещё нет. Сервер обновлений
-/// (когда будет настроен) не должен требовать 1С-учётку.
+/// Манифест и APK лежат в папке APK (WPFD-категория 3193) на портале.
+/// Доступ к порталу требует service-учётки [AppConfig.portalCredentials],
+/// поэтому к каждому запросу прикладывается Basic Auth. Учётка общая для
+/// всех ТСД (не 1С-учётка пользователя) — проверка обновлений идёт до входа.
+///
+/// Использует **отдельный [Dio]**, не [DioClient] 1С: адрес портала не связан
+/// с базой 1С, свой таймаут/ретраи.
 class UpdateRepository {
-  UpdateRepository({Dio? dio}) : _dio = dio ?? Dio();
+  UpdateRepository({Dio? dio, BasicCredentials? portalCredentials})
+      : _dio = dio ?? Dio(),
+        _creds = portalCredentials ??
+            BasicCredentials(
+              AppConfig.portalCredentials.$1,
+              AppConfig.portalCredentials.$2,
+            );
 
   final Dio _dio;
+  final BasicCredentials _creds;
 
   /// GET к манифесту версий → [VersionManifest]. null → нет данных/ошибка.
   /// Любая ошибка (сеть/парсинг) оборачивается в [Failure], не валит приложение.
@@ -32,7 +45,10 @@ class UpdateRepository {
       return const Failure(NetworkError());
     }
     try {
-      final res = await _dio.get<dynamic>(manifestUrl);
+      final res = await _dio.get<dynamic>(
+        manifestUrl,
+        options: _portalOptions(),
+      );
       final data = res.data is String ? jsonDecode(res.data as String) : res.data;
       if (data is! Map<String, dynamic>) {
         _log.warning('Манифест не является JSON-объектом: $data');
@@ -63,6 +79,8 @@ class UpdateRepository {
         apkUrl,
         file.path,
         onReceiveProgress: onProgress,
+        options: _portalOptions(),
+        deleteOnError: true,
       );
       return Success(file);
     } on DioException catch (e) {
@@ -73,4 +91,9 @@ class UpdateRepository {
       return const Failure(NetworkError());
     }
   }
+
+  /// Опции с Basic Auth портала для запросов манифеста/APK.
+  Options _portalOptions() => Options(headers: {
+        'Authorization': _creds.headerValue,
+      });
 }
