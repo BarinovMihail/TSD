@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 64 64">
+  <title>Штрихкод существует</title>
+  <g fill="#2E7D32">
+    <rect x="8" y="14" width="3" height="36" rx="1"/>
+    <rect x="14" y="14" width="2" height="36" rx="1"/>
+    <rect x="19" y="14" width="5" height="36" rx="1"/>
+    <rect x="27" y="14" width="2" height="36" rx="1"/>
+    <rect x="32" y="14" width="4" height="36" rx="1"/>
+    <rect x="39" y="14" width="2" height="36" rx="1"/>
+    <rect x="44" y="14" width="5" height="36" rx="1"/>
+    <rect x="52" y="14" width="3" height="36" rx="1"/>
+  </g>
+  <circle cx="49" cy="48" r="12" fill="#2E7D32"/>
+  <path d="M43 48.5 47 52l8-9" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
