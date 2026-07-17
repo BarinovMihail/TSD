@@ -7,7 +7,6 @@ import 'package:tsd_inventory/core/network/dio_client.dart';
 import 'package:tsd_inventory/core/result/result.dart';
 import 'package:tsd_inventory/core/storage/app_database.dart';
 
-import '../domain/barcode_info.dart';
 import '../domain/doc_table_parser.dart';
 import '../domain/doc_table_row.dart';
 
@@ -16,42 +15,15 @@ final _log = Logger('inventory_repository');
 /// Запись по строке документа: номер строки → (факт, действие).
 typedef LineResult = ({int qty, String action});
 
-/// Табличная часть документа + запись результатов + stub получения ФИО.
+/// Табличная часть документа + запись результатов + штрихкоды.
 /// Стратегия кэш+сеть: при сетевой ошибке fallback на кэш из AppDatabase.
 class InventoryRepository {
   InventoryRepository({required DioClient client, required AppDatabase db})
-      : _client = client,
-        _db = db;
+    : _client = client,
+      _db = db;
 
   final DioClient _client;
   final AppDatabase _db;
-
-  /// GET /hs/inventory/barcode/{Код} → номенклатура и характеристика по штрихкоду
-  /// из регистра сведений. 1С возвращает плоский объект:
-  ///   { "Номенклатура": "Монитор", "Характеристика": "23,5\" Samsung №…" }
-  /// Если штрихкод не зарегистрирован в 1С — пустой объект {} → Success(null).
-  /// Сетевая/серверная ошибка → Failure(ApiError).
-  Future<Result<BarcodeInfo?>> getBarcodeInfo(String code) async {
-    final path = 'hs/inventory/barcode/${Uri.encodeComponent(code)}';
-    try {
-      final res = await _client.getJson<dynamic>(path);
-      final data = res.data is String ? jsonDecode(res.data as String) : res.data;
-      if (data is! Map || data.isEmpty) {
-        // Штрихкод не зарегистрирован в 1С (пустой ответ {}).
-        return const Success(null);
-      }
-      final nom = data['Номенклатура']?.toString() ?? '';
-      final char = data['Характеристика']?.toString() ?? '';
-      // На пустую номенклатуру тоже реагируем как «не зарегистрирован».
-      if (nom.trim().isEmpty) return const Success(null);
-      return Success(BarcodeInfo(nomenclature: nom, characteristic: char));
-    } on DioException catch (e) {
-      return Failure(ApiError.fromDio(e));
-    } catch (e) {
-      _log.warning('Ошибка получения данных штрихкода: $e');
-      return const Failure(ParseError('Не удалось разобрать ответ штрихкода'));
-    }
-  }
 
   /// GET /hs/inventory/code/{Код} → табличная часть.
   /// Сетевая ошибка + есть кэш → отдаём кэш (офлайн).
@@ -59,7 +31,9 @@ class InventoryRepository {
     final path = 'hs/inventory/code/${Uri.encodeComponent(code)}';
     try {
       final res = await _client.getJson<dynamic>(path);
-      final data = res.data is String ? jsonDecode(res.data as String) : res.data;
+      final data = res.data is String
+          ? jsonDecode(res.data as String)
+          : res.data;
       // Кэшируем сырой ответ.
       await _db.cacheDoc(code, jsonEncode(data));
       return Success(parseDocTable(data));
@@ -86,17 +60,16 @@ class InventoryRepository {
   /// Отправляются только строки с ненулевым фактическим количеством
   /// (то, что фактически просканировано).
   Future<Result<void>> postDocResult(
-      String code, Map<int, LineResult> lines) async {
+    String code,
+    Map<int, LineResult> lines,
+  ) async {
     const path = 'hs/inventory/updateFact';
     final body = {
       'НомерДокумента': code,
       'Строки': [
         for (final e in lines.entries)
           if (e.value.qty > 0)
-            {
-              'НомерСтроки': e.key,
-              'КоличествоФактическое': e.value.qty,
-            },
+            {'НомерСтроки': e.key, 'КоличествоФактическое': e.value.qty},
       ],
     };
     try {
@@ -110,33 +83,65 @@ class InventoryRepository {
     }
   }
 
-  /// Добавление новой строки в табличную часть документа 1С.
-  /// Вызывается, когда отсканированный штрихкод не найден среди строк документа,
-  /// и пользователь подтвердил добавление.
-  /// POST /hs/inventory/newStr
-  ///   тело: {
-  ///     "НомерДокумента": "<код документа>",
-  ///     "Номенклатура": "<наименование номенклатуры>",
-  ///     "Характеристика": "<характеристика>"
-  ///   }
-  Future<Result<void>> addNewLine(
-    String docCode,
+  /// Список характеристик выбранной номенклатуры.
+  /// GET /hs/inventory/invent/{Номенклатура} (Номенклатура URL-encoded).
+  /// 1С возвращает JSON-массив строк: ["21,5\" AOC №…", ...].
+  /// Пустые строки отбрасываются, остальные trim-ятся.
+  Future<Result<List<String>>> getCharacteristics(String nomenclature) async {
+    final path = 'hs/inventory/invent/${Uri.encodeComponent(nomenclature)}';
+    try {
+      final res = await _client.getJson<dynamic>(path);
+      final data = res.data is String
+          ? jsonDecode(res.data as String)
+          : res.data;
+      if (data is! List) return const Success([]);
+      final result = <String>[];
+      for (final item in data) {
+        final c = item?.toString().trim() ?? '';
+        if (c.isNotEmpty) result.add(c);
+      }
+      return Success(result);
+    } on DioException catch (e) {
+      return Failure(ApiError.fromDio(e));
+    } catch (e) {
+      _log.warning('Ошибка получения характеристик: $e');
+      return const Failure(
+        ParseError('Не удалось разобрать список характеристик'),
+      );
+    }
+  }
+
+  /// Добавление первого или дополнительного штрихкода позиции в 1С.
+  /// POST /hs/inventory/newBarcode
+  ///   тело: { "Номенклатура": "<наименование>", "Характеристика": "<текст>" }
+  /// «Без характеристики» → пустая строка ("Характеристика": "").
+  /// Формат ответа 1С не предполагается: новый штрихкод и состояние иконки
+  /// получаются повторной загрузкой документа через [getTable].
+  ///
+  /// Запрос может быть тяжёлым (1С генерирует/записывает штрихкод, особенно для
+  /// номенклатур со сложной структурой), поэтому per-request receiveTimeout
+  /// увеличен до 120с. Иначе дефолтный таймаут даёт ложный NetworkError, хотя
+  /// 1С фактически успевает записать штрихкод (он виден после обновления).
+  Future<Result<void>> addBarcode(
     String nomenclature,
     String characteristic,
   ) async {
-    const path = 'hs/inventory/newStr';
+    const path = 'hs/inventory/newBarcode';
     final body = {
-      'НомерДокумента': docCode,
       'Номенклатура': nomenclature,
       'Характеристика': characteristic,
     };
     try {
-      await _client.postJson<dynamic>(path, body: body);
+      await _client.postJson<dynamic>(
+        path,
+        body: body,
+        receiveTimeout: const Duration(seconds: 120),
+      );
       return const Success(null);
     } on DioException catch (e) {
       return Failure(ApiError.fromDio(e));
     } catch (e) {
-      _log.warning('Ошибка добавления строки: $e');
+      _log.warning('Ошибка добавления штрихкода: $e');
       return const Failure(NetworkError());
     }
   }
@@ -145,6 +150,7 @@ class InventoryRepository {
   /// TODO(1С): уточнить эндпоинт (/me? /whoami?). Сейчас ФИО = логин (не используется).
   Future<String> getCurrentUserFio() async {
     throw UnimplementedError(
-        'getCurrentUserFio: эндпоинт уточняется у 1С; сейчас ФИО = логин');
+      'getCurrentUserFio: эндпоинт уточняется у 1С; сейчас ФИО = логин',
+    );
   }
 }

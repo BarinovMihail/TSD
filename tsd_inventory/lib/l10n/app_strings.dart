@@ -43,6 +43,7 @@ abstract final class AppStrings {
   // Табличная часть
   static const search = 'Поиск…';
   static const sortUnscannedFirst = 'Сначала неотсканированные';
+  static const onlyWithoutBarcode = 'Только без штрихкода';
   static const readyToScan = 'ГОТОВ К СКАНИРОВАНИЮ';
   static const scanByCamera = 'Сканировать камерой';
   static const finish = 'Завершить';
@@ -50,9 +51,12 @@ abstract final class AppStrings {
   static const multipleMatches = 'Несколько совпадений. Выберите строку:';
   static const enterManually = 'Ввести код вручную';
   static const scanSuccess = 'Найдено';
-  static const finishConfirm = 'Завершить инвентаризацию и отправить результаты?';
-  static const sendError = 'Не удалось отправить. Сохранено локально. Повторить?';
-  static const noOfflineCopy = 'Нет сохранённой копии документа и нет связи с сервером';
+  static const finishConfirm =
+      'Завершить инвентаризацию и отправить результаты?';
+  static const sendError =
+      'Не удалось отправить. Сохранено локально. Повторить?';
+  static const noOfflineCopy =
+      'Нет сохранённой копии документа и нет связи с сервером';
   static const accounting = 'Кол-во по учёту';
   static const actual = 'Кол-во факт.';
 
@@ -63,7 +67,8 @@ abstract final class AppStrings {
   static String qtyActualOf(int n) => 'Факт: $n';
   static String discrepancyOf(int actual, int accounting) =>
       'расхождение: факт $actual, учёт $accounting';
-  static String notFoundCode(String code) => 'Штрихкод $code не найден в документе';
+  static String notFoundCode(String code) =>
+      'Штрихкод $code не найден в документе';
   static String errServerCode(int code) => 'Ошибка сервера. Код: $code';
 
   // Контроль версий / автообновление
@@ -75,28 +80,27 @@ abstract final class AppStrings {
   static String updatePercent(int p) => '$p%';
   static const updateDownloadError = 'Не удалось скачать обновление';
   static const updateInstallError = 'Не удалось запустить установку';
-  static const updateInstallingReady = 'Подтвердите установку в системном диалоге';
+  static const updateInstallingReady =
+      'Подтвердите установку в системном диалоге';
 
   // Сканирование: сообщения по штрихкоду
-  static String barcodeNotRegistered(String code) =>
-      'Штрихкод $code не зарегистрирован в 1С';
-  static String notFoundInDocByBarcode(String code, String nomenclature) =>
-      'Номенклатура «$nomenclature» (штрихкод $code) не найдена в документе';
-  static const barcodeLookupNetworkError =
-      'Нет связи с сервером. Проверьте Wi-Fi';
+  static const barcodeNotFoundInDoc = 'Штрихкод не найден в текущем документе';
 
-  // Добавление номенклатуры при «не найдено»
-  static String addNomenclatureQuestion(
-          String code, String nomenclature, String characteristic) =>
-      'Номенклатура «$nomenclature»'
-      '${characteristic.isEmpty ? '' : ' ($characteristic)'}'
-      ' (штрихкод $code) не найдена в документе. Добавить?';
-  static const addNomenclature = 'Добавить номенклатуру';
-  static const addNomenclatureSuccess = 'Номенклатура добавлена';
-  static const addNomenclatureError = 'Не удалось добавить. Повторить?';
-  static const addNomenclatureNotFound =
-      'Строка не вернулась из 1С после добавления';
-  static const adding = 'Добавление…';
+  // Добавление / просмотр штрихкодов позиции
+  static const addBarcodeTitle = 'Добавление штрихкода';
+  static const viewBarcodesTitle = 'Штрихкоды позиции';
+  static const addBarcode = 'Добавить штрихкод';
+  static const addNewBarcode = 'Добавить новый штрихкод';
+  static const close = 'Закрыть';
+  static const characteristicLabel = 'Характеристика';
+  static const withoutCharacteristic = 'Без характеристики';
+  static const loadingCharacteristics = 'Загрузка характеристик…';
+  static const addingBarcode = 'Добавление…';
+  static const barcodeSentReloadFailed =
+      'Штрихкод отправлен в 1С, но данные документа не удалось обновить';
+  static const noBarcodesYet = 'У позиции пока нет штрихкодов';
+  static const checkingBarcodeAfterTimeout =
+      'Нет ответа 1С. Проверяю, записан ли штрихкод…';
 
   // Снятие факта сканирования (долгое нажатие на отсканированной позиции)
   static const unscanTitle = 'Управление фактом';

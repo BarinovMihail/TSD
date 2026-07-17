@@ -2,15 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/network/api_error.dart';
 import '../../../core/presentation/confirm_dialog.dart';
 import '../../../core/scanner/keyboard_wedge_scanner.dart';
 import '../../../l10n/app_strings.dart';
 import '../../docs/application/completed_docs_provider.dart';
 import '../application/inventory_screen_controller.dart';
 import '../application/scan_controller.dart';
-import '../domain/barcode_info.dart';
 import '../domain/doc_table_row.dart';
+import 'barcode_dialog.dart';
 import 'row_card.dart';
 
 class InventoryScreen extends ConsumerStatefulWidget {
@@ -59,133 +58,43 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     switch (outcome) {
       case Found():
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('${AppStrings.scanSuccess}: ${outcome.row.nomenclature}'),
-          backgroundColor: Theme.of(context).colorScheme.secondary,
-          duration: const Duration(milliseconds: 800),
-        ));
-      case BarcodeNotRegistered():
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(AppStrings.barcodeNotRegistered(code)),
-          backgroundColor: Theme.of(context).colorScheme.error,
-          duration: const Duration(seconds: 2),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${AppStrings.scanSuccess}: ${outcome.row.nomenclature}',
+            ),
+            backgroundColor: Theme.of(context).colorScheme.secondary,
+            duration: const Duration(milliseconds: 800),
+          ),
+        );
       case NotFoundInDocument():
-        // Номенклатура найдена в 1С, но не сопоставлена строке документа.
-        // Предлагаем добавить её через POST /newStr с парой (Номенклатура,
-        // Характеристика) из ответа /barcode/.
-        _showNotFound(code, outcome.info);
-      case LookupError():
+        // Штрихкод отсутствует во всех массивах «Штрихкоды» строк документа.
+        // Резервный запрос и добавление номенклатуры больше не предлагаются.
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text(AppStrings.barcodeLookupNetworkError),
-          backgroundColor: Theme.of(context).colorScheme.error,
-          duration: const Duration(seconds: 3),
-          action: SnackBarAction(
-              label: AppStrings.retry, onPressed: () => _onCode(code)),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(AppStrings.barcodeNotFoundInDoc),
+            backgroundColor: Theme.of(context).colorScheme.error,
+            duration: const Duration(seconds: 2),
+          ),
+        );
       case Ambiguous():
         _showAmbiguous(outcome.candidates);
+      case ScanIgnored():
+        // Пустое после trim — игнорируем без反馈.
+        break;
     }
   }
 
-  /// Диалог «Добавить номенклатуру»: номенклатура найдена в 1С по штрихкоду,
-  /// но её нет в табличной части документа.
-  void _showNotFound(String code, BarcodeInfo info) {
+  /// Открытие окна штрихкода позиции по тапу на иконку:
+  /// есть штрихкоды → просмотр, нет штрихкодов → добавление.
+  void _openBarcodeDialog(DocTableRow row) {
+    final ctrl = ref.read(inventoryScreenControllerProvider(widget.docCode));
     showDialog<void>(
       context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          title: Text(AppStrings.addNomenclatureQuestion(
-              code, info.nomenclature, info.characteristic)),
-          actions: [
-            // Кнопки единым вертикальным стеком, как в ConfirmDialog.
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Primary — добавить номенклатуру через 1С (заполненная, сверху).
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(60),
-                    textStyle: const TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.w700),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _addMissingLine(code, info);
-                  },
-                  child: const Text(AppStrings.addNomenclature),
-                ),
-                const SizedBox(height: 12),
-                // Secondary — отмена (outline, снизу).
-                OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(56),
-                  ),
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text(AppStrings.cancel),
-                ),
-              ],
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  /// Добавление номенклатуры в документ через 1С (POST /hs/inventory/newStr),
-  /// когда отсканированный код не найден. Успех → перезагрузка строк и факт = 1.
-  Future<void> _addMissingLine(String code, BarcodeInfo info) async {
-    final scan = _scan;
-    if (scan == null) return;
-    // Индикатор «Добавление…».
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showMaterialBanner(
-      MaterialBanner(
-        content: const Row(children: [
-          SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-          SizedBox(width: 16),
-          Text(AppStrings.adding),
-        ]),
-        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-        actions: const [SizedBox.shrink()],
-      ),
-    );
-
-    final res = await scan.addMissingLine(info);
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
-
-    res.maybeWhen(
-      onValue: (_) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text(AppStrings.addNomenclatureSuccess),
-          backgroundColor: Colors.green,
-          duration: const Duration(milliseconds: 1200),
-        ));
-      },
-      orElse: (err) {
-        final msg = err is ParseError
-            ? AppStrings.addNomenclatureNotFound
-            : AppStrings.addNomenclatureError;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(msg),
-          action: SnackBarAction(
-              label: AppStrings.retry,
-              onPressed: () => _addMissingLine(code, info)),
-        ));
-      },
+      builder: (ctx) => row.hasBarcodes
+          ? ViewBarcodesDialog(lineNumber: row.lineNumber, ctrl: ctrl)
+          : AddBarcodeDialog(row: row, ctrl: ctrl),
     );
   }
 
@@ -247,20 +156,26 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(row.nomenclature,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(
+                row.nomenclature,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
               if (row.characteristic.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
-                  child: Text(row.characteristic,
-                      style: TextStyle(color: scheme.outline)),
+                  child: Text(
+                    row.characteristic,
+                    style: TextStyle(color: scheme.outline),
+                  ),
                 ),
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
                   AppStrings.qtyActualOf(row.qtyActual),
                   style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.w700),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ],
@@ -275,9 +190,12 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                   style: FilledButton.styleFrom(
                     minimumSize: const Size.fromHeight(60),
                     textStyle: const TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.w700),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                   onPressed: () {
                     Navigator.pop(ctx);
@@ -320,8 +238,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     if (scan == null) return;
     // Нельзя завершить, если не отсканировано ни одной позиции.
     if (scan.scannedCount == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Сначала отсканируйте хотя бы одну позицию')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Сначала отсканируйте хотя бы одну позицию'),
+        ),
+      );
       return;
     }
     final fullyScanned = scan.isFullyScanned;
@@ -338,42 +259,51 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       if (discrepancyCount > 0) {
         // Неполный список, но по отсканированным позициям есть расхождения.
         title = const Text('Отправить неполный результат с расхождениями?');
-        content = Text.rich(TextSpan(children: [
-          const TextSpan(text: 'Отсканировано '),
-          b('${scan.scannedCount}'),
-          const TextSpan(text: ' из '),
-          b('${scan.total}'),
-          const TextSpan(text: ' позиций, '),
-          b('$left'),
-          const TextSpan(text: ' не отсканировано.\n'),
-          const TextSpan(text: 'По '),
-          b('$discrepancyCount'),
-          const TextSpan(
-              text: ' отсканированным позициям факт не совпадает с учётом.'),
-        ]));
+        content = Text.rich(
+          TextSpan(
+            children: [
+              const TextSpan(text: 'Отсканировано '),
+              b('${scan.scannedCount}'),
+              const TextSpan(text: ' из '),
+              b('${scan.total}'),
+              const TextSpan(text: ' позиций, '),
+              b('$left'),
+              const TextSpan(text: ' не отсканировано.\n'),
+              const TextSpan(text: 'По '),
+              b('$discrepancyCount'),
+              const TextSpan(
+                text: ' отсканированным позициям факт не совпадает с учётом.',
+              ),
+            ],
+          ),
+        );
         sendLabel = 'Отправить неполное с расхождением';
       } else {
         title = const Text('Отправить неполный результат?');
-        content = Text.rich(TextSpan(children: [
-          const TextSpan(text: 'Отсканировано '),
-          b('${scan.scannedCount}'),
-          const TextSpan(text: ' из '),
-          b('${scan.total}'),
-          const TextSpan(text: ' позиций, '),
-          b('$left'),
-          const TextSpan(text: ' не отсканировано.'),
-        ]));
+        content = Text.rich(
+          TextSpan(
+            children: [
+              const TextSpan(text: 'Отсканировано '),
+              b('${scan.scannedCount}'),
+              const TextSpan(text: ' из '),
+              b('${scan.total}'),
+              const TextSpan(text: ' позиций, '),
+              b('$left'),
+              const TextSpan(text: ' не отсканировано.'),
+            ],
+          ),
+        );
         sendLabel = 'Отправить неполное';
       }
     } else if (hasDiscrepancies) {
       title = const Text('Отправить с расхождениями?');
       content = const Text(
-          'Фактическое количество по некоторым позициям не совпадает с учётом.');
+        'Фактическое количество по некоторым позициям не совпадает с учётом.',
+      );
       sendLabel = 'Отправить с расхождением';
     } else {
       title = const Text('Завершить и отправить?');
-      content = const Text(
-          'Все позиции отсканированы без расхождений.');
+      content = const Text('Все позиции отсканированы без расхождений.');
       sendLabel = 'Отправить';
     }
 
@@ -399,16 +329,21 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       onValue: (_) {
         // Обновляем метку «отправлен» в списке документов.
         ref.invalidate(completedDocsProvider);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
             content: Text('Результаты отправлены'),
-            backgroundColor: Colors.green));
+            backgroundColor: Colors.green,
+          ),
+        );
         context.go('/docs');
       },
       orElse: (err) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(AppStrings.sendError),
-          action: SnackBarAction(label: AppStrings.retry, onPressed: _finish),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(AppStrings.sendError),
+            action: SnackBarAction(label: AppStrings.retry, onPressed: _finish),
+          ),
+        );
       },
     );
   }
@@ -428,24 +363,31 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       body: ctrl.loading
           ? const Center(child: CircularProgressIndicator())
           : ctrl.loadError != null
-              ? Center(
-                  child: Text(ctrl.loadError!,
-                      style: const TextStyle(fontSize: 18)))
-              : Focus(
-                  focusNode: _scanFocus,
-                  onKeyEvent: _scanner.handleKeyEvent,
-                  autofocus: true,
-                  child: _Body(ctrl: ctrl, onUnscan: _showUnscanDialog),
-                ),
+          ? Center(
+              child: Text(
+                ctrl.loadError!,
+                style: const TextStyle(fontSize: 18),
+              ),
+            )
+          : Focus(
+              focusNode: _scanFocus,
+              onKeyEvent: _scanner.handleKeyEvent,
+              autofocus: true,
+              child: _Body(
+                ctrl: ctrl,
+                onUnscan: _showUnscanDialog,
+                onTapBarcode: _openBarcodeDialog,
+              ),
+            ),
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: ElevatedButton(
             // Кнопка отключена, пока не отсканировано ни одной позиции.
-            onPressed:
-                (ctrl.scan?.scannedCount ?? 0) > 0 ? _finish : null,
+            onPressed: (ctrl.scan?.scannedCount ?? 0) > 0 ? _finish : null,
             child: Text(
-                '${AppStrings.finish} (${ctrl.scan?.scannedCount ?? 0}/${ctrl.scan?.total ?? 0})'),
+              '${AppStrings.finish} (${ctrl.scan?.scannedCount ?? 0}/${ctrl.scan?.total ?? 0})',
+            ),
           ),
         ),
       ),
@@ -454,11 +396,18 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
 }
 
 class _Body extends ConsumerWidget {
-  const _Body({required this.ctrl, required this.onUnscan});
+  const _Body({
+    required this.ctrl,
+    required this.onUnscan,
+    required this.onTapBarcode,
+  });
   final InventoryScreenController ctrl;
 
   /// Долгое нажатие по отсканированной позиции → диалог снятия факта.
   final void Function(DocTableRow row) onUnscan;
+
+  /// Тап по иконке штрихкода → окно добавления/просмотра штрихкодов.
+  final void Function(DocTableRow row) onTapBarcode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -469,6 +418,11 @@ class _Body extends ConsumerWidget {
 
     // Фильтр + сортировка.
     var rows = List<DocTableRow>.from(scan.rows);
+    // Фильтр «Только без штрихкода»: только строки без штрихкодов.
+    // Данные и прогресс сканирования не меняет.
+    if (ctrl.onlyWithoutBarcode) {
+      rows = rows.where((r) => r.barcodes.isEmpty).toList();
+    }
     final q = ctrl.searchQuery.toLowerCase();
     if (q.isNotEmpty) {
       rows = rows.where((r) {
@@ -497,7 +451,9 @@ class _Body extends ConsumerWidget {
                 child: Text(
                   AppStrings.scannedProgressOf(scan.scannedCount, scan.total),
                   style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.w600),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
@@ -524,14 +480,22 @@ class _Body extends ConsumerWidget {
           onChanged: ctrl.toggleSort,
           title: const Text(AppStrings.sortUnscannedFirst),
         ),
+        SwitchListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+          value: ctrl.onlyWithoutBarcode,
+          onChanged: ctrl.toggleOnlyWithoutBarcode,
+          title: const Text(AppStrings.onlyWithoutBarcode),
+        ),
         // Список строк + pull-to-refresh.
         Expanded(
           child: RefreshIndicator(
-            onRefresh: ctrl.reload,
-              child: ListView.builder(
+            onRefresh: () async => ctrl.reload(),
+            child: ListView.builder(
               itemCount: rows.length,
               itemBuilder: (context, i) => RowCard(
                 row: rows[i],
+                // Иконка штрихкода всегда активна (добавить/посмотреть).
+                onTapBarcode: () => onTapBarcode(rows[i]),
                 // Long-press доступен только для отсканированных позиций.
                 onLongPress: rows[i].isFound ? () => onUnscan(rows[i]) : null,
               ),

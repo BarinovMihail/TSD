@@ -2,115 +2,101 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tsd_inventory/features/inventory/domain/barcode_matcher.dart';
 import 'package:tsd_inventory/features/inventory/domain/doc_table_row.dart';
 
-DocTableRow _row(int line,
-        {String nom = '', String char = '', String code = ''}) =>
-    DocTableRow(
-      lineNumber: line,
-      inventoryNumber: '',
-      nomenclature: nom,
-      nomenclatureCode: code,
-      characteristic: char,
-      series: '',
-      seriesStatus: '0',
-      fio: '',
-      qtyAccounting: 1,
-      qtyActual: 0,
-      action: '',
-    );
+DocTableRow _row(int line, {List<String> barcodes = const []}) => DocTableRow(
+  lineNumber: line,
+  inventoryNumber: '',
+  nomenclature: 'N$line',
+  nomenclatureCode: 'k$line',
+  characteristic: '',
+  series: '',
+  seriesStatus: '0',
+  fio: '',
+  qtyAccounting: 1,
+  qtyActual: 0,
+  action: '',
+  barcodes: barcodes,
+);
 
 void main() {
-  group('matchByNomenclatureCharacteristic', () {
-    test('уникальное совпадение по паре Номенклатура+Характеристика', () {
+  group('matchByBarcode', () {
+    test('совпадение с единственным штрихкодом позиции → unique', () {
       final rows = [
-        _row(1, nom: 'Монитор', char: '23,5" Samsung №CWGCH4ZR503628'),
-        _row(2, nom: 'Клавиатура', char: ''),
+        _row(1, barcodes: ['2000000009100']),
+        _row(2, barcodes: ['111']),
       ];
-      final r = BarcodeMatcher().matchByNomenclatureCharacteristic(
-          'Монитор', '23,5" Samsung №CWGCH4ZR503628', rows);
+      final r = BarcodeMatcher().matchByBarcode('2000000009100', rows);
       expect(r.isUnique, true);
       expect(r.exact.single.lineNumber, 1);
     });
 
-    test('совпадение когда характеристика пустая у строки и у запроса', () {
-      final rows = [_row(1, nom: 'Клавиатура', char: '')];
-      final r = BarcodeMatcher().matchByNomenclatureCharacteristic(
-          'Клавиатура', '', rows);
-      expect(r.isUnique, true);
+    test('совпадение со вторым/последующим штрихкодом позиции → unique', () {
+      final rows = [
+        _row(1, barcodes: ['111', '222', '333']),
+      ];
+      // Совпадение с третьим штрихкодом тоже отмечает позицию.
+      expect(BarcodeMatcher().matchByBarcode('333', rows).isUnique, true);
+      expect(BarcodeMatcher().matchByBarcode('222', rows).isUnique, true);
+      final r = BarcodeMatcher().matchByBarcode('111', rows);
       expect(r.exact.single.lineNumber, 1);
     });
 
-    test('несколько строк с одинаковой парой → ambiguous', () {
+    test('отсутствие совпадения → none', () {
       final rows = [
-        _row(1, nom: 'Монитор', char: 'Black'),
-        _row(2, nom: 'Монитор', char: 'Black'), // дубль пары
+        _row(1, barcodes: ['111']),
       ];
-      final r = BarcodeMatcher().matchByNomenclatureCharacteristic(
-          'Монитор', 'Black', rows);
+      expect(BarcodeMatcher().matchByBarcode('999', rows).isNone, true);
+    });
+
+    test('одинаковый штрихкод у нескольких строк → ambiguous', () {
+      final rows = [
+        _row(1, barcodes: ['111', 'SHARED']),
+        _row(2, barcodes: ['SHARED']),
+      ];
+      final r = BarcodeMatcher().matchByBarcode('SHARED', rows);
       expect(r.isAmbiguous, true);
       expect(r.exact.length, 2);
     });
 
-    test('разная характеристика → не совпадает', () {
+    test('пробелы вокруг отсканированного значения игнорируются (trim)', () {
       final rows = [
-        _row(1, nom: 'Монитор', char: 'Black'),
-        _row(2, nom: 'Монитор', char: 'White'),
+        _row(1, barcodes: ['111']),
       ];
-      final r = BarcodeMatcher()
-          .matchByNomenclatureCharacteristic('Монитор', 'White', rows);
-      expect(r.isUnique, true);
-      expect(r.exact.single.lineNumber, 2);
+      expect(BarcodeMatcher().matchByBarcode('  111  ', rows).isUnique, true);
     });
 
-    test('номенклатура есть, характеристика другая → none', () {
-      final rows = [_row(1, nom: 'Монитор', char: 'Black')];
-      final r = BarcodeMatcher()
-          .matchByNomenclatureCharacteristic('Монитор', 'White', rows);
-      expect(r.isNone, true);
+    test('ведущие нули сохраняются: «007890» ≠ «7890»', () {
+      final rows = [
+        _row(1, barcodes: ['007890']),
+      ];
+      expect(BarcodeMatcher().matchByBarcode('007890', rows).isUnique, true);
+      expect(BarcodeMatcher().matchByBarcode('7890', rows).isNone, true);
     });
 
-    test('нет такой номенклатуры → none', () {
-      final rows = [_row(1, nom: 'Монитор', char: '')];
-      final r = BarcodeMatcher()
-          .matchByNomenclatureCharacteristic('Принтер', '', rows);
-      expect(r.isNone, true);
+    test('пустой отсканированный код → none', () {
+      final rows = [
+        _row(1, barcodes: ['111']),
+      ];
+      expect(BarcodeMatcher().matchByBarcode('', rows).isNone, true);
     });
 
-    test('пустая номенклатура в запросе → none', () {
-      final rows = [_row(1, nom: 'Монитор', char: '')];
+    test('совпадение по строковому равенству, без int-преобразования', () {
+      // «0123» и «123» как строки различны.
+      final rows = [
+        _row(1, barcodes: ['0123']),
+      ];
+      expect(BarcodeMatcher().matchByBarcode('123', rows).isNone, true);
+      expect(BarcodeMatcher().matchByBarcode('0123', rows).isUnique, true);
+    });
+
+    test('позиция без штрихкодов не participates', () {
+      final rows = [
+        _row(1, barcodes: []),
+        _row(2, barcodes: ['111']),
+      ];
       expect(
-          BarcodeMatcher()
-              .matchByNomenclatureCharacteristic('', '', rows)
-              .isNone,
-          true);
-    });
-
-    test('нормализация: регистр не важен', () {
-      final rows = [_row(1, nom: 'Монитор', char: 'Black')];
-      expect(
-          BarcodeMatcher()
-              .matchByNomenclatureCharacteristic('МОНИТОР', 'BLACK', rows)
-              .isUnique,
-          true);
-    });
-
-    test('нормализация: лишние пробелы коллапсируются', () {
-      final rows = [_row(1, nom: 'Монитор 24', char: 'Black')];
-      expect(
-          BarcodeMatcher()
-              .matchByNomenclatureCharacteristic(
-                  '  Монитор   24 ', '  Black  ', rows)
-              .isUnique,
-          true);
-    });
-  });
-
-  group('normalizeCode (для addMissingLine)', () {
-    test('восклицательные знаки → пробелы, trim', () {
-      expect(BarcodeMatcher().normalizeCode('618810!!!!!'), '618810');
-    });
-
-    test('trailing пробелы убираются', () {
-      expect(BarcodeMatcher().normalizeCode('000123      '), '000123');
+        BarcodeMatcher().matchByBarcode('111', rows).exact.single.lineNumber,
+        2,
+      );
     });
   });
 }

@@ -30,13 +30,15 @@ class BasicCredentials {
 /// при каждом новом репозитории.
 class DioClient {
   DioClient({required AppConfig config, required BasicCredentials credentials})
-      : _config = config {
-    _dio = Dio(BaseOptions(
-      connectTimeout: Duration(seconds: config.connectTimeoutSec),
-      receiveTimeout: Duration(seconds: config.receiveTimeoutSec),
-      responseType: ResponseType.json,
-      headers: {'Accept': 'application/json'},
-    ));
+    : _config = config {
+    _dio = Dio(
+      BaseOptions(
+        connectTimeout: Duration(seconds: config.connectTimeoutSec),
+        receiveTimeout: Duration(seconds: config.receiveTimeoutSec),
+        responseType: ResponseType.json,
+        headers: {'Accept': 'application/json'},
+      ),
+    );
     _dio.interceptors.add(_BasicAuthInterceptor(credentials));
   }
 
@@ -51,8 +53,23 @@ class DioClient {
   Future<Response<T>> getJson<T>(String path, {Map<String, dynamic>? query}) =>
       _request<T>((url) => _dio.get<T>(url, queryParameters: query), path);
 
-  Future<Response<T>> postJson<T>(String path, {Object? body}) =>
-      _request<T>((url) => _dio.post<T>(url, data: body), path);
+  /// POST с опциональным per-request receiveTimeout. Для тяжёлых операций 1С
+  /// (например, генерация/запись нового штрихкода) передают большее значение,
+  /// чтобы не получить ложный NetworkError по дефолтному таймауту.
+  Future<Response<T>> postJson<T>(
+    String path, {
+    Object? body,
+    Duration? receiveTimeout,
+  }) => _request<T>(
+    (url) => _dio.post<T>(
+      url,
+      data: body,
+      options: receiveTimeout == null
+          ? null
+          : Options(receiveTimeout: receiveTimeout),
+    ),
+    path,
+  );
 
   /// Выполняет запрос, перебирая хосты при сетевой ошибке/тайм-ауте.
   /// Стартуем с последнего успешного хоста ([_erpActiveHost] для ERP).
@@ -76,7 +93,9 @@ class DioClient {
         return resp;
       } on DioException catch (e) {
         if (_isSwitchable(e) && i < hosts.length - 1) {
-          _log.warning('Хост ${hosts[idx]} недоступен (${e.type}), пробую резервный');
+          _log.warning(
+            'Хост ${hosts[idx]} недоступен (${e.type}), пробую резервный',
+          );
           lastNetErr = e;
           continue; // сетевая ошибка → следующий хост
         }
