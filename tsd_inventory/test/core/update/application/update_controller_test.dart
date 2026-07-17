@@ -20,7 +20,7 @@ AppConfig _config({String manifestUrl = 'http://host/manifest.json'}) =>
 VersionManifest _manifest({int versionCode = 5}) => VersionManifest(
       versionCode: versionCode,
       versionName: '0.5.0',
-      apkUrl: 'http://host/app.apk',
+      apkFileId: 58930,
       releaseNotes: 'Тест',
     );
 

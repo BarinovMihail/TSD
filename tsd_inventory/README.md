@@ -99,38 +99,45 @@ class AppConfig {
 скачивание APK → системный установщик Android.
 
 Манифест и APK лежат на портале **internal** в папке APK (категория
-WP File Download `3193`): `http://internal/wp-content/uploads/wpfd/3193/`.
-Доступ к порталу требует service-учётки (`AppConfig.portalCredentials`),
-которая прикладывается к запросам манифеста и APK как Basic Auth.
+WP File Download `3193`). Файлы **защищены**: плагин не отдаёт прямых ссылок,
+а скачивание идёт через AJAX-эндпоинт `file.download`, требующий **cookies
+авторизованной сессии WordPress** (Basic-auth WP не принимает). Поэтому
+`UpdateRepository` сначала логинится под service-учёткой
+(`AppConfig.portalCredentials` → `wp-login.php`), получает cookies сессии и
+через них качает манифест и APK.
 
-URL манифеста задаётся в `lib/core/config/app_config.dart` (поле `updateManifestUrl`).
+URL манифеста задаётся в `lib/core/config/app_config.dart` (поле `updateManifestUrl`)
+— это ссылка `file.download` с `wpfd_file_id` = `AppConfig.portalManifestFileId`.
 **Пустая строка — фича выключена**, проверка не идёт.
 
-Формат JSON-манифеста (`apkUrl` — имя файла или полный URL):
+Формат JSON-манифеста (`apkFileId` — ID файла APK в категории WPFD):
 ```json
 {
   "versionName": "0.2.5",
   "versionCode": 7,
-  "apkUrl": "tsd_inventory-0.2.5.apk",
+  "apkFileId": 58930,
   "releaseNotes": "Что нового"
 }
 ```
-- `apkUrl` может быть **относительным** (просто имя файла) — тогда он достраивается
-  от папки APK портала. Удобнее: при заливке новой версии достаточно поменять
-  версию и имя файла.
+- `apkFileId` — это **числовой ID файла APK** в категории 3193 (не имя и не URL).
+  Виден в админке WPFD при заливке APK или в списке файлов категории.
 - Сравнение по `versionCode` (целое, монотонно растёт — надёжнее парсинга X.Y.Z).
 
 ### Публикация новой версии
 
 1. Собрать release-APK (тем же ключом, что установлен): `flutter build apk --release`.
-2. Залить `tsd_inventory-<версия>.apk` в папку APK на портале (WPFD 3193).
-3. Обновить `manifest.json` в той же папке: поднять `versionCode`/`versionName`
-   и поменять `apkUrl` на имя нового APK. Шаблон — `dist/manifest.json` в репо.
+2. Залить `tsd_inventory-<версия>.apk` в папку APK на портале (WPFD 3193) под
+   учёткой с правами на загрузку (Author/Admin, не `services` — у него прав нет).
+3. Узнать **ID** залитого APK (виден в админке WPFD / через список файлов категории).
+4. Обновить `manifest.json` в той же категории: поднять `versionCode`/`versionName`
+   и вписать новый `apkFileId`. Шаблон — `dist/manifest.json` в репо.
+5. При **первой** публикации — вписать ID файла `manifest.json` в
+   `AppConfig.portalManifestFileId` (чтобы приложение знало, откуда тянуть манифест).
 
-> ⚠️ `apkUrl` должен быть **прямым URL файла** (или именем файла в папке APK),
-> а не ссылкой на HTML-страницу категории вида `?page_id=54947#…` — по ней
-> скачается HTML, а не APK. Прямой URL берётся из админки WPFD / копированием
-> ссылки скачивания в браузере.
+> ⚠️ У учётки `services` нет прав на **загрузку** файлов в категорию — только на
+> чтение. Заливать APK/манифест должен пользователь с ролью Author/Admin/`wpas_agent`.
+> Скачивание же под `services` работает (проверено: приложение успешно качает файлы
+> категории после cookie-логина).
 
 
 Требования Android (уже настроены):

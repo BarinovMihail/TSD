@@ -2,21 +2,21 @@ import 'package:tsd_inventory/core/config/app_config.dart';
 
 /// Манифест версии: описание доступного обновления с сервера.
 ///
-/// Контракт JSON (см. план контроля версий):
+/// Контракт JSON:
 /// ```json
 /// {
-///   "versionName": "0.2.0",
-///   "versionCode": 2,
-///   "apkUrl": "tsd-0.2.0.apk",
-///   "releaseNotes": "Добавлен контроль версий"
+///   "versionName": "0.2.5",
+///   "versionCode": 7,
+///   "apkFileId": 58930,
+///   "releaseNotes": "Что нового"
 /// }
 /// ```
 ///
-/// `apkUrl` может быть **относительным** (просто имя файла, напр.
-/// `tsd-0.2.0.apk`) — тогда он достраивается от [AppConfig.portalApkDir]
-/// (папка APK на портале internal). Либо полным URL (`http://…/file.apk`) —
-/// тогда используется как есть. Относительный формат удобнее: при заливке
-/// новой версии достаточно поменять версию и имя файла в манифесте.
+/// `apkFileId` — это **ID файла APK в категории WP File Download** на портале
+/// internal (категория 3193). Прямых ссылок плагин не отдаёт (файлы защищены),
+/// поэтому приложение скачивает APK через AJAX-эндпоинт `file.download` под
+/// cookie-сессией. ID файла виден в админке WPFD при заливке APK; его вписывают
+/// в манифест при публикации новой версии.
 ///
 /// Сравнение версий идёт по целочисленному [versionCode] (монотонно растёт),
 /// а не по строке versionName — это надёжнее и нечувствительно к формату X.Y.Z.
@@ -24,43 +24,34 @@ class VersionManifest {
   const VersionManifest({
     required this.versionCode,
     required this.versionName,
-    required this.apkUrl,
+    required this.apkFileId,
     required this.releaseNotes,
   });
 
-  /// Целочисленный код версии (из pubspec: «0.2.0+2» → 2). Монотонно растёт.
+  /// Целочисленный код версии (из pubspec: «0.2.5+7» → 7). Монотонно растёт.
   final int versionCode;
 
-  /// Человекочитаемая версия («0.2.0»). Только для отображения.
+  /// Человекочитаемая версия («0.2.5»). Только для отображения.
   final String versionName;
 
-  /// URL или имя файла APK (см. [resolvedApkUrl]).
-  final String apkUrl;
+  /// ID файла APK в категории WPFD на портале. См. описание класса.
+  final int apkFileId;
 
   /// Текст изменений (необязательно). Показывается в диалоге.
   final String releaseNotes;
 
-  /// Полный URL скачивания APK. Если [apkUrl] — уже полный URL (с схемой),
-  /// отдаётся как есть. Имя файла достраивается от папки APK на портале.
-  String get resolvedApkUrl {
-    final u = apkUrl.trim();
-    if (u.isEmpty) return '';
-    if (u.startsWith('http://') || u.startsWith('https://')) return u;
-    // Относительное имя файла → склейка с папкой APK портала.
-    final base = AppConfig.portalApkDir.endsWith('/')
-        ? AppConfig.portalApkDir.substring(0, AppConfig.portalApkDir.length - 1)
-        : AppConfig.portalApkDir;
-    final name = u.startsWith('/') ? u.substring(1) : u;
-    return '$base/$name';
-  }
+  /// Полный URL скачивания APK через эндпоинт плагина (подставляется [apkFileId]).
+  /// Запрос требует cookies авторизованной сессии WP (см. [UpdateRepository]).
+  String get resolvedApkUrl => AppConfig.portalFileDownloadUrl(apkFileId);
 
   /// Парсинг из JSON. Поля с невалидным типом заменяются значениями по умолчанию
-  /// (versionCode → 0, строки → пустые), чтобы битый манифест не ронял приложение.
+  /// (versionCode/apkFileId → 0, строки → пустые), чтобы битый манифест не ронял
+  /// приложение. apkFileId может прийти числом или строкой («58930»).
   factory VersionManifest.fromJson(Map<String, dynamic> json) {
     return VersionManifest(
-      versionCode: tryVersionCode(json['versionCode']) ?? 0,
+      versionCode: tryInt(json['versionCode']) ?? 0,
       versionName: (json['versionName'] ?? '').toString(),
-      apkUrl: (json['apkUrl'] ?? '').toString(),
+      apkFileId: tryInt(json['apkFileId']) ?? 0,
       releaseNotes: (json['releaseNotes'] ?? '').toString(),
     );
   }
@@ -69,9 +60,8 @@ class VersionManifest {
   /// Сравнение строгое по versionCode (равные → не обновляемся).
   bool isNewerThan(int currentVersionCode) => versionCode > currentVersionCode;
 
-  /// Безопасное приведение versionCode к int.
-  /// 1С/сервер может прислать число как строку («2») или как число (2).
-  static int? tryVersionCode(Object? v) {
+  /// Безопасное приведение к int (1С/сервер может прислать «58930» или 58930).
+  static int? tryInt(Object? v) {
     if (v is int) return v;
     if (v is num) return v.toInt();
     if (v is String) return int.tryParse(v.trim());

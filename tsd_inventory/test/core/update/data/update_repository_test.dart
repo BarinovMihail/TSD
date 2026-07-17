@@ -19,7 +19,11 @@ void main() {
     dio = Dio();
     adapter = MockAdapter();
     dio.httpClientAdapter = adapter;
-    repo = UpdateRepository(dio: dio);
+    // Cookie-логин на портал в тестах не выполняем — отдаём фиксированную cookie.
+    repo = UpdateRepository(
+      dio: dio,
+      login: (_, __, ___) async => 'wordpress_logged_in_test=test',
+    );
   });
 
   group('checkForUpdate', () {
@@ -28,7 +32,7 @@ void main() {
         jsonEncode({
           'versionName': '0.2.0',
           'versionCode': 2,
-          'apkUrl': 'http://host/app.apk',
+          'apkFileId': 58930,
           'releaseNotes': 'Новое',
         }),
         200,
@@ -42,7 +46,7 @@ void main() {
       final m = (res as Success).value;
       expect(m.versionCode, 2);
       expect(m.versionName, '0.2.0');
-      expect(m.apkUrl, 'http://host/app.apk');
+      expect(m.apkFileId, 58930);
     });
 
     test('пустой URL → Failure (фича выключена)', () async {

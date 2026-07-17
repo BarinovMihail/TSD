@@ -7,12 +7,12 @@ void main() {
       final m = VersionManifest.fromJson({
         'versionName': '0.2.0',
         'versionCode': 2,
-        'apkUrl': 'http://host/app.apk',
+        'apkFileId': 58930,
         'releaseNotes': 'Что-то новое',
       });
       expect(m.versionCode, 2);
       expect(m.versionName, '0.2.0');
-      expect(m.apkUrl, 'http://host/app.apk');
+      expect(m.apkFileId, 58930);
       expect(m.releaseNotes, 'Что-то новое');
     });
 
@@ -39,7 +39,7 @@ void main() {
     test('отсутствуют строковые поля → пустые строки', () {
       final m = VersionManifest.fromJson({'versionCode': 5});
       expect(m.versionName, '');
-      expect(m.apkUrl, '');
+      expect(m.apkFileId, 0);
       expect(m.releaseNotes, '');
     });
   });
@@ -47,19 +47,19 @@ void main() {
   group('isNewerThan', () {
     test('манифест новее → true', () {
       const m = VersionManifest(
-          versionCode: 5, versionName: '', apkUrl: '', releaseNotes: '');
+          versionCode: 5, versionName: '', apkFileId: 0, releaseNotes: '');
       expect(m.isNewerThan(2), isTrue);
     });
 
     test('манифест равен текущей → false (строгое сравнение)', () {
       const m = VersionManifest(
-          versionCode: 5, versionName: '', apkUrl: '', releaseNotes: '');
+          versionCode: 5, versionName: '', apkFileId: 0, releaseNotes: '');
       expect(m.isNewerThan(5), isFalse);
     });
 
     test('манифест старее текущей → false', () {
       const m = VersionManifest(
-          versionCode: 1, versionName: '', apkUrl: '', releaseNotes: '');
+          versionCode: 1, versionName: '', apkFileId: 0, releaseNotes: '');
       expect(m.isNewerThan(5), isFalse);
     });
   });
