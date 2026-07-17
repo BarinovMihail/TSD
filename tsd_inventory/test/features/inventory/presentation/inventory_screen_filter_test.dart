@@ -98,6 +98,8 @@ void main() {
     await tester.pumpWidget(harness());
     await tester.pump();
 
+    expect(find.byType(FilterChip), findsNWidgets(2));
+    expect(find.byType(SwitchListTile), findsNothing);
     expect(find.text('Номенклатура 1'), findsOneWidget);
     expect(find.text('Номенклатура 2'), findsOneWidget);
   });

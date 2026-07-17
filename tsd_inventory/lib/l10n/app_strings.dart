@@ -42,8 +42,8 @@ abstract final class AppStrings {
 
   // Табличная часть
   static const search = 'Поиск…';
-  static const sortUnscannedFirst = 'Сначала неотсканированные';
-  static const onlyWithoutBarcode = 'Только без штрихкода';
+  static const sortUnscannedFirst = 'Неотсканированные ↑';
+  static const onlyWithoutBarcode = 'Без ШК';
   static const readyToScan = 'ГОТОВ К СКАНИРОВАНИЮ';
   static const scanByCamera = 'Сканировать камерой';
   static const finish = 'Завершить';

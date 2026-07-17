@@ -474,17 +474,26 @@ class _Body extends ConsumerWidget {
             onChanged: ctrl.setSearch,
           ),
         ),
-        SwitchListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-          value: ctrl.unscannedFirst,
-          onChanged: ctrl.toggleSort,
-          title: const Text(AppStrings.sortUnscannedFirst),
-        ),
-        SwitchListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-          value: ctrl.onlyWithoutBarcode,
-          onChanged: ctrl.toggleOnlyWithoutBarcode,
-          title: const Text(AppStrings.onlyWithoutBarcode),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                FilterChip(
+                  label: const Text(AppStrings.sortUnscannedFirst),
+                  selected: ctrl.unscannedFirst,
+                  onSelected: ctrl.toggleSort,
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text(AppStrings.onlyWithoutBarcode),
+                  selected: ctrl.onlyWithoutBarcode,
+                  onSelected: ctrl.toggleOnlyWithoutBarcode,
+                ),
+              ],
+            ),
+          ),
         ),
         // Список строк + pull-to-refresh.
         Expanded(
