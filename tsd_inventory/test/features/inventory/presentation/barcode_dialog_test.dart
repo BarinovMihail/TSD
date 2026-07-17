@@ -209,6 +209,7 @@ void main() {
 
       verify(() => repo.addBarcode(any(), any())).called(1);
       verify(() => repo.getTable('АЕ-1')).called(1); // перезагрузка
+      expect(find.text('Штрихкод успешно добавлен'), findsOneWidget);
     });
 
     testWidgets('ошибка POST (сервер) → окно открыто, есть «Повторить»', (
@@ -362,6 +363,7 @@ void main() {
       verify(() => repo.getTable('АЕ-1')).called(1);
       // После перезагрузки в списке появился новый штрихкод.
       expect(find.text('444'), findsOneWidget);
+      expect(find.text('Штрихкод успешно добавлен'), findsOneWidget);
     });
   });
 }

@@ -6,7 +6,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tsd_inventory/features/inventory/domain/doc_table_row.dart';
 import 'package:tsd_inventory/features/inventory/presentation/row_card.dart';
 
-DocTableRow _row({List<String> barcodes = const []}) => DocTableRow(
+DocTableRow _row({
+  List<String> barcodes = const [],
+  int qtyActual = 0,
+}) => DocTableRow(
   lineNumber: 1,
   inventoryNumber: '44182',
   nomenclature: 'Монитор',
@@ -16,7 +19,7 @@ DocTableRow _row({List<String> barcodes = const []}) => DocTableRow(
   seriesStatus: '0',
   fio: '',
   qtyAccounting: 1,
-  qtyActual: 0,
+  qtyActual: qtyActual,
   action: '',
   barcodes: barcodes,
 );
@@ -164,6 +167,26 @@ void main() {
     expect(
       (img.image as AssetImage).assetName,
       'assets/icons/barcode_available.png',
+    );
+  });
+
+  testWidgets('у отсканированной позиции иконка остаётся на светлой подложке', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      wrap(
+        RowCard(
+          row: _row(barcodes: const ['111'], qtyActual: 1),
+          onTapBarcode: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final button = tester.widget<IconButton>(find.byType(IconButton));
+    expect(
+      button.style?.backgroundColor?.resolve(<WidgetState>{}),
+      Theme.of(tester.element(find.byType(IconButton))).colorScheme.surface,
     );
   });
 

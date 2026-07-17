@@ -6,6 +6,17 @@ import '../../../l10n/app_strings.dart';
 import '../application/inventory_screen_controller.dart';
 import '../domain/doc_table_row.dart';
 
+void _showBarcodeAdded(BuildContext context) {
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.hideCurrentSnackBar();
+  messenger.showSnackBar(
+    SnackBar(
+      content: const Text(AppStrings.barcodeAddedSuccess),
+      backgroundColor: Theme.of(context).colorScheme.secondary,
+    ),
+  );
+}
+
 /// Окно добавления штрихкода для позиции без штрихкодов (barcode_missing).
 ///
 /// Показывает номенклатуру (не редактируется) и характеристику: если она уже
@@ -85,6 +96,7 @@ class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
       case AddBarcodeOutcome.done:
       case AddBarcodeOutcome.verifiedAfterTimeout:
         // Штрихкод записан и виден в данных — закрываем окно.
+        _showBarcodeAdded(context);
         if (mounted) Navigator.of(context).pop(true);
       case AddBarcodeOutcome.failed:
         // Штрихкод НЕ записан — показываем ошибку 1С, окно оставляем.
@@ -283,6 +295,7 @@ class _ViewBarcodesDialogState extends ConsumerState<ViewBarcodesDialog> {
       case AddBarcodeOutcome.done:
       case AddBarcodeOutcome.verifiedAfterTimeout:
         // Штрихкод записан — список обновлён из перезагруженного документа.
+        _showBarcodeAdded(context);
         break;
       case AddBarcodeOutcome.failed:
         // Штрихкод НЕ записан — ошибка 1С.

@@ -90,6 +90,7 @@ abstract final class AppStrings {
   static const addBarcodeTitle = 'Добавление штрихкода';
   static const viewBarcodesTitle = 'Штрихкоды позиции';
   static const addBarcode = 'Добавить штрихкод';
+  static const barcodeAddedSuccess = 'Штрихкод успешно добавлен';
   static const addNewBarcode = 'Добавить новый штрихкод';
   static const close = 'Закрыть';
   static const characteristicLabel = 'Характеристика';

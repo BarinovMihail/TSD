@@ -64,6 +64,15 @@ class RowCard extends StatelessWidget {
                       minWidth: 40,
                       minHeight: 40,
                     ),
+                    style: IconButton.styleFrom(
+                      backgroundColor: scheme.surface,
+                      side: BorderSide(
+                        color: found ? scheme.secondary : scheme.outlineVariant,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
                     icon: Image.asset(
                       'assets/icons/barcode_${row.hasBarcodes ? 'available' : 'missing'}.png',
                       width: 28,
