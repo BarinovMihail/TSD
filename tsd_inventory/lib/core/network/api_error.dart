@@ -53,3 +53,12 @@ class ParseError extends ApiError {
   @override
   String get userMessage => 'Ошибка обработки данных сервера';
 }
+
+/// Целостность скачанного APK нарушена: SHA-256 не совпал с манифестом.
+/// Файл уже удалён, установка не запускалась.
+class IntegrityError extends ApiError {
+  const IntegrityError();
+  @override
+  String get userMessage =>
+      'Файл обновления повреждён (SHA-256 не совпал). Попробуйте ещё раз';
+}

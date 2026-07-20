@@ -1,12 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:logging/logging.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
-import 'package:tsd_inventory/core/config/app_config.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:tsd_inventory/core/network/api_error.dart';
+import 'package:tsd_inventory/core/network/dio_client.dart';
 import 'package:tsd_inventory/core/result/result.dart';
 
 import '../domain/version_manifest.dart';
@@ -16,65 +17,46 @@ final _log = Logger('update_repository');
 /// Колбэк прогресса скачивания APK: (полученоБайт, всегоБайт).
 typedef DownloadProgress = void Function(int received, int total);
 
-/// Получение манифеста версий и скачивание APK с портала internal.
+/// Получение манифеста версий и скачивание APK через защищённый сервис 1С.
 ///
-/// Файлы категории APK (WPFD 3193) на портале **защищены**: плагин не отдаёт
-/// прямых ссылок, а AJAX-эндпоинт `file.download` требует **cookies
-/// авторизованной сессии WordPress** (Basic-auth WP не принимает). Поэтому
-/// репозиторий сначала логинится на `wp-login.php` под service-учёткой
-/// [AppConfig.portalCredentials], получает cookies и дальше качает манифест и
-/// APK с ними. Учётка общая для всех ТСД (не 1С-учётка) — обновление идёт до входа.
+/// Архитектура цепочки автообновления:
+/// ```
+/// приложение → 1С (HTTP-сервис /hs/inventory/update, Basic Auth)
+///            → Yandex API Gateway → Cloud Function → приватный Object Storage.
+/// ```
+/// Приложение обращается **только** к 1С: тот же [DioClient] с Basic-аутентификацией
+/// текущей сессии пользователя, таймаутами и failover по адресам ERP. Никаких
+/// отдельных токенов, WordPress cookies или X-Update-Token в клиенте нет.
 ///
-/// Использует **отдельный [Dio]**, не [DioClient] 1С: адрес портала не связан
-/// с базой 1С, свой таймаут, своя авторизация.
+/// APK скачивается напрямую по подписанной ссылке [VersionManifest.apkUrl] из
+/// ответа 1С — это временная ссылка Yandex Object Storage, уже содержащая
+/// подпись, поэтому для неё используется **отдельный чистый [Dio]** без
+/// авторизационных interceptor-ов (без Basic Auth 1С, без cookies, без токенов).
 class UpdateRepository {
-  UpdateRepository({
-    Dio? dio,
-    Future<String?> Function(Dio dio, Uri loginUrl, (String, String) creds)?
-        login,
-    (String, String)? credentials,
-  })  : _dio = dio ?? Dio(),
-        login = login ?? _wpLogin,
-        credentials = credentials ?? AppConfig.portalCredentials;
+  UpdateRepository({required DioClient client, Dio? downloadDio})
+    : _client = client,
+      _downloadDio = downloadDio ?? Dio();
 
-  final Dio _dio;
+  /// Авторизованный клиент 1С: запрос манифеста идёт под Basic Auth сессии.
+  final DioClient _client;
 
-  /// Функция cookie-логина на портал. По умолчанию [_wpLogin]; в тестах можно
-  /// подсунуть заглушку, возвращающую фиксированную cookie.
-  final Future<String?> Function(Dio dio, Uri loginUrl, (String, String) creds)
-      login;
+  /// Чистый Dio для скачивания APK по подписанной ссылке Object Storage.
+  /// Намеренно без interceptor-ов: подписанная ссылка самодостаточна.
+  final Dio _downloadDio;
 
-  /// Service-учётка портала (login, password).
-  final (String, String) credentials;
-
-  /// Кэш Cookie-заголовка сессии (один логин на серию запросов манифест+APK).
-  String? _cookie;
-
-  Future<String?> _ensureCookie() async {
-    var c = _cookie;
-    if (c != null && c.isNotEmpty) return c;
-    try {
-      c = await login(_dio, Uri.parse(AppConfig.portalLoginUrl), credentials);
-      _cookie = c;
-    } catch (e) {
-      _log.warning('Cookie-логин на портал не удался: $e');
-    }
-    return c;
-  }
-
-  /// GET к манифесту версий → [VersionManifest]. null → нет данных/ошибка.
-  /// Любая ошибка (сеть/парсинг) оборачивается в [Failure], не валит приложение.
-  Future<Result<VersionManifest>> checkForUpdate(String manifestUrl) async {
-    if (manifestUrl.isEmpty) {
+  /// GET манифеста версий через защищённый endpoint 1С.
+  /// [endpointUrl] — обычно `AppConfig.inventoryPath('update')`.
+  /// Любая ошибка (сеть/парсинг/HTTP) оборачивается в [Failure], не валит
+  /// приложение.
+  Future<Result<VersionManifest>> checkForUpdate(String endpointUrl) async {
+    if (endpointUrl.isEmpty) {
       return const Failure(NetworkError());
     }
     try {
-      final cookie = await _ensureCookie();
-      final res = await _dio.get<dynamic>(
-        manifestUrl,
-        options: Options(headers: _portalHeaders(cookie), responseType: ResponseType.json),
-      );
-      final data = res.data is String ? jsonDecode(res.data as String) : res.data;
+      final res = await _client.getJson<dynamic>(endpointUrl);
+      final data = res.data is String
+          ? jsonDecode(res.data as String)
+          : res.data;
       if (data is! Map<String, dynamic>) {
         _log.warning('Манифест не является JSON-объектом: $data');
         return const Failure(ParseError('Манифест версий некорректен'));
@@ -89,25 +71,53 @@ class UpdateRepository {
     }
   }
 
-  /// Скачивание APK. [targetDir] — куда положить файл (по умолчанию
-  /// временная директория системы; параметр нужен для тестов). Возвращает файл.
-  /// [onProgress] вызывается по мере загрузки (для прогресс-бара).
+  /// Скачивание APK и проверка целостности.
+  ///
+  /// [apkUrl] — подписанная ссылка Object Storage (без Basic Auth/cookies/токенов).
+  /// [sha256] — ожидаемый хеш из манифеста; пустая строка → манифест невалиден,
+  /// установка невозможна (возвращаем [ParseError], файл не качаем).
+  /// [targetDir] — куда положить файл (по умолчанию временная директория системы;
+  /// параметр нужен для тестов). [onProgress] — для прогресс-бара.
+  ///
+  /// После скачивания вычисляется SHA-256 файла и сравнивается с [sha256] без
+  /// учёта регистра. При несовпадении файл удаляется и возвращается
+  /// [IntegrityError] — установка не запускается.
   Future<Result<File>> downloadApk(
     String apkUrl, {
+    required String sha256,
     Directory? targetDir,
     DownloadProgress? onProgress,
   }) async {
+    if (apkUrl.isEmpty) {
+      return const Failure(ParseError('Манифест версий некорректен'));
+    }
+    if (sha256.isEmpty) {
+      // Без хеша целостность проверить нельзя — считаем манифест некорректным.
+      return const Failure(ParseError('Манифест версий некорректен'));
+    }
     try {
       final dir = targetDir ?? await getTemporaryDirectory();
       final file = File(p.join(dir.path, 'tsd_update.apk'));
-      final cookie = await _ensureCookie();
-      await _dio.download(
+      await _downloadDio.download(
         apkUrl,
         file.path,
         onReceiveProgress: onProgress,
-        options: Options(headers: _portalHeaders(cookie)),
+        // Никаких авторизационных заголовков: подписанная ссылка самодостаточна.
         deleteOnError: true,
       );
+      // Обязательная проверка целостности до запуска установщика.
+      final actual = await _sha256OfFile(file);
+      if (actual.toLowerCase() != sha256.toLowerCase()) {
+        _log.warning(
+          'SHA-256 не совпал: expected=$sha256 actual=$actual; удаляю APK',
+        );
+        try {
+          await file.delete();
+        } catch (_) {
+          /* файл мог уже удалиться через deleteOnError */
+        }
+        return const Failure(IntegrityError());
+      }
       return Success(file);
     } on DioException catch (e) {
       _log.warning('Ошибка скачивания APK: $e');
@@ -118,50 +128,9 @@ class UpdateRepository {
     }
   }
 
-  /// Заголовки для запросов к порталу: cookie сессии + Referer (WPFD проверяет).
-  Map<String, dynamic> _portalHeaders(String? cookie) => {
-        if (cookie != null && cookie.isNotEmpty) 'Cookie': cookie,
-        'Referer': '${AppConfig.portalUrl}/',
-      };
-}
-
-/// Cookie-логин в WordPress: POST на [AppConfig.portalLoginUrl] с
-/// `log`/`pwd` → собираем `Set-Cookie` в одну строку `name=value; ...`.
-/// Возвращает null, если войти не удалось.
-Future<String?> _wpLogin(
-  Dio dio,
-  Uri loginUrl,
-  (String, String) creds,
-) async {
-  final form = FormData.fromMap({
-    'log': creds.$1,
-    'pwd': creds.$2,
-    'wp-submit': 'Войти',
-    'redirect_to': '${AppConfig.portalUrl}/wp-admin/',
-    'testcookie': '1',
-  });
-  // followRedirects: false — не уходим на /wp-admin, нам нужны только cookies.
-  final res = await dio.post(
-    loginUrl.toString(),
-    data: form,
-    options: Options(
-      followRedirects: false,
-      validateStatus: (s) => s != null && s < 400,
-      headers: {'Referer': '${AppConfig.portalUrl}/wp-login.php'},
-    ),
-  );
-  final setCookies = res.headers['set-cookie'];
-  if (setCookies == null || setCookies.isEmpty) return null;
-  final pairs = <String>[];
-  for (final raw in setCookies) {
-    // raw: "name=value; Path=/; HttpOnly" → берём "name=value"
-    final first = raw.split(';').first.trim();
-    if (first.isNotEmpty) pairs.add(first);
+  /// SHA-256 файла в нижнем регистре (потоково, чтобы не грузить весь APK в память).
+  static Future<String> _sha256OfFile(File file) async {
+    final digest = await sha256.bind(file.openRead()).first;
+    return digest.toString();
   }
-  final cookie = pairs.join('; ');
-  if (!cookie.contains('wordpress_logged_in')) {
-    _log.warning('WP-логин не дал wordpress_logged_in cookie — неверная учётка?');
-    return null;
-  }
-  return cookie;
 }

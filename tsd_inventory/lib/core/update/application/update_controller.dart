@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:tsd_inventory/core/config/app_config.dart';
+import 'package:tsd_inventory/core/network/dio_client.dart';
 import 'package:tsd_inventory/core/update/data/apk_installer.dart';
 import 'package:tsd_inventory/core/update/data/update_repository.dart';
 import 'package:tsd_inventory/core/update/domain/version_manifest.dart';
@@ -52,17 +53,22 @@ class UpdateError extends UpdateState {
 /// `checkAndPrompt()` → [UpdateChecking] → ([UpdateAvailable] | [UpdateIdle] |
 /// [UpdateError]). При `UpdateAvailable` пользователь жмёт «Обновить» →
 /// `downloadAndInstall()` → [UpdateDownloading] → [UpdateInstalling].
+///
+/// Манифест запрашивается у 1С через [AppConfig.inventoryPath]('update') под
+/// Basic-аутентификацией текущей сессии пользователя. Проверка запускается UI
+/// только после успешного входа в 1С — провайдер читается на DocsListScreen.
+/// Защита от повторных параллельных проверок — в [checkAndPrompt] (if not idle).
 class UpdateController extends ChangeNotifier {
   UpdateController({
     required AppConfig config,
     required UpdateRepository repo,
     required ApkInstaller installer,
     Future<int> Function()? currentVersionCodeProvider,
-  })  : _config = config,
-        _repo = repo,
-        _installer = installer,
-        _currentVersionCodeProvider =
-            currentVersionCodeProvider ?? _defaultVersionCode;
+  }) : _config = config,
+       _repo = repo,
+       _installer = installer,
+       _currentVersionCodeProvider =
+           currentVersionCodeProvider ?? _defaultVersionCode;
 
   final AppConfig _config;
   final UpdateRepository _repo;
@@ -75,13 +81,19 @@ class UpdateController extends ChangeNotifier {
   bool get hasUpdate => state is UpdateAvailable;
 
   /// Проверить наличие обновления. Если есть — состояние [UpdateAvailable].
-  /// Манифест выключен (пустой URL) → тихо остаётся idle.
+  /// Не запускается повторно, пока проверка/обновление уже активны — это защита
+  /// от двойного диалога при повторном входе на экран.
   Future<void> checkAndPrompt() async {
-    if (_config.updateManifestUrl.isEmpty) return; // фича выключена
+    if (state is UpdateChecking ||
+        state is UpdateAvailable ||
+        state is UpdateDownloading ||
+        state is UpdateInstalling) {
+      return;
+    }
     state = const UpdateChecking();
     notifyListeners();
 
-    final res = await _repo.checkForUpdate(_config.updateManifestUrl);
+    final res = await _repo.checkForUpdate(_config.inventoryPath('update'));
     final manifest = res.maybeWhen<VersionManifest?>(
       onValue: (m) => m,
       orElse: (_) => null,
@@ -105,18 +117,29 @@ class UpdateController extends ChangeNotifier {
     if (s is! UpdateAvailable) return;
     final manifest = s.manifest;
 
+    // Нет подписанной ссылки или хеша → установить нельзя.
+    if (!manifest.isValid) {
+      state = const UpdateError('Манифест обновления некорректен');
+      notifyListeners();
+      return;
+    }
+
     state = const UpdateDownloading(null);
     notifyListeners();
 
-    final res = await _repo.downloadApk(manifest.resolvedApkUrl, onProgress: (r, t) {
-      final p = t > 0 ? r / t : null;
-      state = UpdateDownloading(p);
-      notifyListeners();
-    });
+    final res = await _repo.downloadApk(
+      manifest.apkUrl,
+      sha256: manifest.sha256,
+      onProgress: (r, t) {
+        final p = t > 0 ? r / t : null;
+        state = UpdateDownloading(p);
+        notifyListeners();
+      },
+    );
     final file = res.maybeWhen(
       onValue: (f) => f,
-      orElse: (_) {
-        state = const UpdateError('Не удалось скачать обновление');
+      orElse: (e) {
+        state = UpdateError(e.userMessage);
         notifyListeners();
       },
     );
@@ -135,7 +158,8 @@ class UpdateController extends ChangeNotifier {
     }
   }
 
-  /// Сброс к idle (например, пользователь нажал «Пропустить»).
+  /// Сброс к idle (например, пользователь нажал «Пропустить»). Доступен только
+  /// для необязательных обновлений — UI прячет кнопку при `manifest.required`.
   void skip() {
     state = const UpdateIdle();
     notifyListeners();
@@ -148,12 +172,27 @@ class UpdateController extends ChangeNotifier {
   }
 }
 
-final updateControllerProvider =
-    ChangeNotifierProvider<UpdateController>((ref) {
+final updateControllerProvider = ChangeNotifierProvider<UpdateController>((
+  ref,
+) {
   final config = ref.watch(appConfigProvider);
+  // Сессия обязательна: провайдер читается только после успешного входа
+  // (на DocsListScreen). До входа автообновление не должно работать —
+  // endpoint 1С требует Basic-аутентификации.
+  final session = ref.watch(authControllerProvider).session;
+  if (session == null) {
+    throw StateError(
+      'updateControllerProvider: авторизация ещё не выполнена (нет сессии)',
+    );
+  }
   return UpdateController(
     config: config,
-    repo: UpdateRepository(),
+    repo: UpdateRepository(
+      client: DioClient(
+        config: config,
+        credentials: BasicCredentials(session.login, session.password),
+      ),
+    ),
     installer: ApkInstaller(),
   );
 });

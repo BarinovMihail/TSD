@@ -1,6 +1,8 @@
 {
-  "versionName": "0.2.5",
-  "versionCode": 7,
-  "apkFileId": 0,
-  "releaseNotes": "Автообновление перенесено на портал internal. Переключение базы ERP/ERP_Local, failover по адресам."
+  "versionName": "0.2.6",
+  "versionCode": 8,
+  "apkKey": "releases/tsd-inventory-0.2.6-8.apk",
+  "sha256": "<sha256 APK в нижнем регистре>",
+  "releaseNotes": "Описание изменений",
+  "required": false
 }

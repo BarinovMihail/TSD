@@ -4,8 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/network/api_error.dart';
 import '../../../core/presentation/confirm_dialog.dart';
-import '../../../core/update/application/update_controller.dart';
-import '../../../core/update/presentation/update_dialog.dart';
 import '../../../l10n/app_strings.dart';
 import '../application/auth_controller.dart';
 
@@ -29,8 +27,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.initState();
     // Восстановить сохранённые логин/пароль для активной базы и состояние чекбоксов.
     _restoreSavedCredentials();
-    // Проверка обновлений при входе (до авторизации — не требует учётки 1С).
-    _checkForUpdates();
+    // Проверка обновлений выполняется после успешного входа на DocsListScreen:
+    // endpoint 1С /hs/inventory/update требует Basic-аутентификации сессии.
   }
 
   Future<void> _restoreSavedCredentials() async {
@@ -51,38 +49,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
   }
 
-  Future<void> _checkForUpdates() async {
-    final controller = ref.read(updateControllerProvider);
-    controller.addListener(_onUpdateStateChanged);
-    await controller.checkAndPrompt();
-  }
-
-  void _onUpdateStateChanged() {
-    final controller = ref.read(updateControllerProvider);
-    if (!mounted) return;
-    if (controller.hasUpdate && _updateDialogShown == false) {
-      _updateDialogShown = true;
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => UpdateDialog(controller: controller),
-      ).then((_) {
-        // Диалог закрыли → слушатель больше не нужен.
-        if (mounted) {
-          controller.removeListener(_onUpdateStateChanged);
-        }
-      });
-    }
-  }
-
-  bool _updateDialogShown = false;
-
   @override
   void dispose() {
     _loginCtrl.dispose();
     _passCtrl.dispose();
-    // Слушатель обновлений мог остаться, если диалог не был показан.
-    ref.read(updateControllerProvider).removeListener(_onUpdateStateChanged);
     super.dispose();
   }
 
@@ -94,7 +64,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _loading = true;
       _error = null;
     });
-    final err = await ref.read(authControllerProvider.notifier).login(
+    final err = await ref
+        .read(authControllerProvider.notifier)
+        .login(
           _loginCtrl.text.trim(),
           _passCtrl.text,
           rememberLogin: _rememberLogin,
@@ -171,14 +143,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(AppStrings.loginTitle,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleLarge),
+                Text(
+                  AppStrings.loginTitle,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
                 const SizedBox(height: 32),
                 TextField(
                   controller: _loginCtrl,
-                  decoration:
-                      const InputDecoration(labelText: AppStrings.loginField),
+                  decoration: const InputDecoration(
+                    labelText: AppStrings.loginField,
+                  ),
                   textInputAction: TextInputAction.next,
                   onChanged: (_) => setState(() {}),
                 ),
@@ -188,12 +163,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   decoration: InputDecoration(
                     labelText: AppStrings.passwordField,
                     suffixIcon: IconButton(
-                      icon: Icon(_obscure
-                          ? Icons.visibility
-                          : Icons.visibility_off),
+                      icon: Icon(
+                        _obscure ? Icons.visibility : Icons.visibility_off,
+                      ),
                       tooltip: AppStrings.showPassword,
-                      onPressed: () =>
-                          setState(() => _obscure = !_obscure),
+                      onPressed: () => setState(() => _obscure = !_obscure),
                     ),
                   ),
                   obscureText: _obscure,
@@ -204,8 +178,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   value: _rememberLogin,
-                  onChanged: (v) =>
-                      setState(() => _rememberLogin = v ?? true),
+                  onChanged: (v) => setState(() => _rememberLogin = v ?? true),
                   title: const Text(AppStrings.rememberLogin),
                 ),
                 CheckboxListTile(
@@ -218,10 +191,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 if (_error != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8, bottom: 8),
-                    child: Text(_error!,
-                        style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                            fontSize: 18)),
+                    child: Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontSize: 18,
+                      ),
+                    ),
                   ),
                 const SizedBox(height: 16),
                 ElevatedButton(

@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/presentation/confirm_dialog.dart';
+import '../../../core/update/application/update_controller.dart';
+import '../../../core/update/presentation/update_dialog.dart';
 import '../../../l10n/app_strings.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../inventory/application/providers.dart';
@@ -11,11 +13,73 @@ import '../application/completed_docs_provider.dart';
 import '../application/docs_controller.dart';
 import '../domain/doc_list_item.dart';
 
-class DocsListScreen extends ConsumerWidget {
+class DocsListScreen extends ConsumerStatefulWidget {
   const DocsListScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DocsListScreen> createState() => _DocsListScreenState();
+}
+
+class _DocsListScreenState extends ConsumerState<DocsListScreen> {
+  /// Показан ли уже диалог обновления в этой сессии. Без этого флага повторный
+  /// вход на экран или rebuild могли бы показать второй диалог.
+  bool _updateDialogShown = false;
+
+  /// Ссылка на контроллер обновлений: сохраняем при запуске проверки, чтобы
+  /// безопасно снять слушателя в dispose (к моменту dispose сессия может уже
+  /// быть сброшена logout-ом, и ref.read(updateControllerProvider) выбросит
+  /// StateError — провайдер требует сессии).
+  UpdateController? _updateController;
+
+  @override
+  void initState() {
+    super.initState();
+    // Проверка обновлений — после успешной авторизации (сессия уже есть),
+    // endpoint 1С /hs/inventory/update защищён Basic-аутентификацией.
+    // Post-frame, чтобы showDialog шёл от построенного контекста экрана.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdates());
+  }
+
+  void _onUpdateStateChanged() {
+    final controller = _updateController;
+    if (controller == null || !mounted) return;
+    if (controller.hasUpdate && !_updateDialogShown) {
+      _updateDialogShown = true;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => UpdateDialog(controller: controller),
+      ).then((_) {
+        if (mounted) controller.removeListener(_onUpdateStateChanged);
+      });
+    }
+  }
+
+  Future<void> _checkForUpdates() async {
+    if (!mounted) return;
+    try {
+      final controller = ref.read(updateControllerProvider);
+      _updateController = controller;
+      controller.addListener(_onUpdateStateChanged);
+      await controller.checkAndPrompt();
+    } catch (e) {
+      // Случиться не должно (провайдер требует сессии, а мы уже на docs-экране),
+      // но ошибка проверки обновления никогда не должна мешать работе.
+      debugPrint('Проверка обновления не запустилась: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    // Слушатель обновлений мог остаться, если диалог не был показан. Контроллер
+    // dispose-ится самим Riverpod при исчезновении зависимостей — снятие
+    // слушателя с уже disposed ChangeNotifier безопасно (Flutter не бросает).
+    _updateController?.removeListener(_onUpdateStateChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final fio = ref.watch(authControllerProvider).session?.fio ?? '';
     final asyncDocs = ref.watch(docsControllerProvider);
     final asyncCompleted = ref.watch(completedDocsProvider);
@@ -52,8 +116,10 @@ class DocsListScreen extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(AppStrings.docsEmpty,
-                      style: TextStyle(fontSize: 20)),
+                  const Text(
+                    AppStrings.docsEmpty,
+                    style: TextStyle(fontSize: 20),
+                  ),
                   const SizedBox(height: 16),
                   OutlinedButton(
                     onPressed: () =>
@@ -70,7 +136,8 @@ class DocsListScreen extends ConsumerWidget {
             child: ListView.builder(
               itemCount: docs.length,
               itemBuilder: (context, i) {
-                final completed = asyncCompleted.maybeWhen(
+                final completed =
+                    asyncCompleted.maybeWhen(
                       data: (s) => s.contains(docs[i].number),
                       orElse: () => false,
                     ) ||
@@ -91,15 +158,22 @@ class DocsListScreen extends ConsumerWidget {
 
   /// Long-press по отправленному документу → подтверждение → снять пометку.
   Future<void> _confirmUnmark(
-      BuildContext context, WidgetRef ref, String number) async {
+    BuildContext context,
+    WidgetRef ref,
+    String number,
+  ) async {
     await ConfirmDialog.show(
       context,
       title: const Text('Снять пометку «Отправлен»?'),
-      content: Text.rich(TextSpan(children: [
-        const TextSpan(text: 'Документ '),
-        b(number),
-        const TextSpan(text: ' снова будет показан как неотправленный.'),
-      ])),
+      content: Text.rich(
+        TextSpan(
+          children: [
+            const TextSpan(text: 'Документ '),
+            b(number),
+            const TextSpan(text: ' снова будет показан как неотправленный.'),
+          ],
+        ),
+      ),
       // Безопасное действие — отмена (заполненная, сверху).
       primaryLabel: AppStrings.cancel,
       onPrimary: () {},
@@ -151,26 +225,37 @@ class _DocCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(doc.number,
-                        style: const TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.w700)),
+                    Text(
+                      doc.number,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     const SizedBox(height: 4),
-                    Text(df.format(doc.date), style: const TextStyle(fontSize: 16)),
+                    Text(
+                      df.format(doc.date),
+                      style: const TextStyle(fontSize: 16),
+                    ),
                     if (doc.department != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                            '${AppStrings.deptLabel}: ${doc.department}',
-                            style: TextStyle(fontSize: 14, color: scheme.outline)),
+                          '${AppStrings.deptLabel}: ${doc.department}',
+                          style: TextStyle(fontSize: 14, color: scheme.outline),
+                        ),
                       ),
                     if (completed)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
-                        child: Text('✓ Отправлен',
-                            style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: scheme.secondary)),
+                        child: Text(
+                          '✓ Отправлен',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.secondary,
+                          ),
+                        ),
                       ),
                   ],
                 ),
@@ -198,7 +283,10 @@ class _ErrorView extends StatelessWidget {
           const SizedBox(height: 12),
           Text(message, style: const TextStyle(fontSize: 20)),
           const SizedBox(height: 16),
-          ElevatedButton(onPressed: onRetry, child: const Text(AppStrings.retry)),
+          ElevatedButton(
+            onPressed: onRetry,
+            child: const Text(AppStrings.retry),
+          ),
         ],
       ),
     );

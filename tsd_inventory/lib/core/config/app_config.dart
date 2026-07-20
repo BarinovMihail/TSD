@@ -7,12 +7,6 @@ class AppConfig {
     this.scannerMode = ScannerMode.keyboardWedge,
     this.connectTimeoutSec = 10,
     this.receiveTimeoutSec = 30,
-    // Манифест скачивается с портала по ID файла (cookie-логин + file.download).
-    // ID задаётся один раз при первой заливке manifest.json в категорию 3193.
-    this.updateManifestUrl =
-        '$portalUrl/wp-admin/admin-ajax.php?juwpfisadmin=false&action=wpfd'
-        '&task=file.download&wpfd_category_id=$portalApkCategoryId'
-        '&wpfd_file_id=$portalManifestFileId',
   });
 
   /// Базовый URL HTTP-сервисов 1С (без /hs/...).
@@ -33,47 +27,17 @@ class AppConfig {
   /// Локальная база (fallback, если ERP недоступен целиком).
   static const localUrl = 'http://192.168.1.51/ERP_Local/';
 
-  /// Базовый URL портала internal — корень, где лежит папка APK (WPFD 3193).
-  static const portalUrl = 'http://internal';
-
-  /// URL входа WordPress на портале. [UpdateRepository] логинится сюда под
-  /// [portalCredentials], получает cookies сессии и через них скачивает
-  /// манифест и APK — прямые ссылки плагин не отдаёт (файлы защищены).
-  static const portalLoginUrl = '$portalUrl/wp-login.php';
-
-  /// ID категории APK на портале (WP File Download 3193).
-  static const portalApkCategoryId = 3193;
-
-  /// ID файла manifest.json в категории APK. Задаётся один раз после первой
-  /// заливки манифеста на портал (виден в админке WPFD / в списке файлов
-  /// категории). На этот ID строится дефолтный [updateManifestUrl].
-  static const portalManifestFileId = 0;
-
-  /// URL AJAX-эндпоинта WP File Download для скачивания файла по его ID.
-  /// В манифесте указывается [VersionManifest.apkFileId]; сюда подставляется
-  /// `wpfd_file_id`. Требует cookies сессии (cookie-логин WP).
-  static String portalFileDownloadUrl(int fileId) =>
-      '$portalUrl/wp-admin/admin-ajax.php?juwpfisadmin=false&action=wpfd'
-      '&task=file.download&wpfd_category_id=$portalApkCategoryId&wpfd_file_id=$fileId';
-
-  /// Service-учётка для доступа к папке APK на портале internal.
-  /// Файлы категории защищены, Basic-auth WP не принимает — [UpdateRepository]
-  /// проходит cookie-логин под этой учёткой и качает файлы с cookies сессии.
-  static const portalCredentials = ('services', '92!OrSqCt9oRJ*K!cwHF0^yd');
-
   final ScannerMode scannerMode;
   final int connectTimeoutSec;
   final int receiveTimeoutSec;
 
-  /// URL JSON-манифеста версий для автообновления.
-  /// По умолчанию — manifest.json в папке APK на портале internal (WPFD 3193).
-  /// Пусто → фича выключена. См. README «Контроль версий».
-  final String updateManifestUrl;
-
   /// Конструирует полный путь: baseUrl + '/hs/inventory/' + path.
+  /// Используется для всех запросов к 1С, включая защищённый Basic-аутентификацией
+  /// эндпоинт автообновления: `inventoryPath('update')`.
   String inventoryPath(String path) {
-    final base =
-        baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+    final base = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
     return '$base/hs/inventory/$path';
   }
 

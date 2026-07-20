@@ -29,16 +29,21 @@ class BasicCredentials {
 /// инстансами клиента в процессе — чтобы не ждать таймаут на мёртвом хосте
 /// при каждом новом репозитории.
 class DioClient {
-  DioClient({required AppConfig config, required BasicCredentials credentials})
-    : _config = config {
-    _dio = Dio(
-      BaseOptions(
-        connectTimeout: Duration(seconds: config.connectTimeoutSec),
-        receiveTimeout: Duration(seconds: config.receiveTimeoutSec),
-        responseType: ResponseType.json,
-        headers: {'Accept': 'application/json'},
-      ),
-    );
+  DioClient({
+    required AppConfig config,
+    required BasicCredentials credentials,
+    Dio? dio,
+  }) : _config = config {
+    _dio =
+        dio ??
+        Dio(
+          BaseOptions(
+            connectTimeout: Duration(seconds: config.connectTimeoutSec),
+            receiveTimeout: Duration(seconds: config.receiveTimeoutSec),
+            responseType: ResponseType.json,
+            headers: {'Accept': 'application/json'},
+          ),
+        );
     _dio.interceptors.add(_BasicAuthInterceptor(credentials));
   }
 

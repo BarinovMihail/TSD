@@ -14,15 +14,22 @@ class _MockRepo extends Mock implements UpdateRepository {}
 
 class _MockInstaller extends Mock implements ApkInstaller {}
 
-AppConfig _config({String manifestUrl = 'http://host/manifest.json'}) =>
-    AppConfig(updateManifestUrl: manifestUrl);
+const _config = AppConfig(baseUrl: 'http://test-host/erp/');
 
-VersionManifest _manifest({int versionCode = 5}) => VersionManifest(
-      versionCode: versionCode,
-      versionName: '0.5.0',
-      apkFileId: 58930,
-      releaseNotes: 'Тест',
-    );
+VersionManifest _manifest({
+  int versionCode = 5,
+  bool required = false,
+  String apkUrl = 'https://storage.example/file.apk?sig=abc',
+  String sha256 = 'abc',
+}) => VersionManifest(
+  versionCode: versionCode,
+  versionName: '0.5.0',
+  apkUrl: apkUrl,
+  releaseNotes: 'Тест',
+  sha256: sha256,
+  urlExpiresInSec: 600,
+  required: required,
+);
 
 void main() {
   late _MockRepo repo;
@@ -36,10 +43,11 @@ void main() {
 
   group('checkAndPrompt', () {
     test('манифест новее текущей → UpdateAvailable', () async {
-      when(() => repo.checkForUpdate(any()))
-          .thenAnswer((_) async => Success(_manifest(versionCode: 5)));
+      when(
+        () => repo.checkForUpdate(any()),
+      ).thenAnswer((_) async => Success(_manifest(versionCode: 5)));
       final controller = UpdateController(
-        config: _config(),
+        config: _config,
         repo: repo,
         installer: installer,
         currentVersionCodeProvider: () async => 2,
@@ -52,10 +60,11 @@ void main() {
     });
 
     test('манифест равен текущей → UpdateIdle', () async {
-      when(() => repo.checkForUpdate(any()))
-          .thenAnswer((_) async => Success(_manifest(versionCode: 2)));
+      when(
+        () => repo.checkForUpdate(any()),
+      ).thenAnswer((_) async => Success(_manifest(versionCode: 2)));
       final controller = UpdateController(
-        config: _config(),
+        config: _config,
         repo: repo,
         installer: installer,
         currentVersionCodeProvider: () async => 2,
@@ -67,10 +76,11 @@ void main() {
     });
 
     test('манифест старее текущей → UpdateIdle', () async {
-      when(() => repo.checkForUpdate(any()))
-          .thenAnswer((_) async => Success(_manifest(versionCode: 1)));
+      when(
+        () => repo.checkForUpdate(any()),
+      ).thenAnswer((_) async => Success(_manifest(versionCode: 1)));
       final controller = UpdateController(
-        config: _config(),
+        config: _config,
         repo: repo,
         installer: installer,
         currentVersionCodeProvider: () async => 2,
@@ -81,11 +91,12 @@ void main() {
       expect(controller.state, isA<UpdateIdle>());
     });
 
-    test('ошибка сети → тихо UpdateIdle (не мешает работе)', () async {
-      when(() => repo.checkForUpdate(any()))
-          .thenAnswer((_) async => const Failure(NetworkError()));
+    test('сетевая ошибка → тихо UpdateIdle (не мешает работе)', () async {
+      when(
+        () => repo.checkForUpdate(any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
       final controller = UpdateController(
-        config: _config(),
+        config: _config,
         repo: repo,
         installer: installer,
         currentVersionCodeProvider: () async => 2,
@@ -96,33 +107,65 @@ void main() {
       expect(controller.state, isA<UpdateIdle>());
     });
 
-    test('пустой URL манифеста → не дёргает сеть, UpdateIdle', () async {
+    test(
+      'повторный вызов во время UpdateChecking не запускает второй запрос',
+      () async {
+        when(
+          () => repo.checkForUpdate(any()),
+        ).thenAnswer((_) async => Success(_manifest(versionCode: 5)));
+        final controller = UpdateController(
+          config: _config,
+          repo: repo,
+          installer: installer,
+          currentVersionCodeProvider: () async => 2,
+        );
+        final f1 = controller.checkAndPrompt();
+        final f2 = controller
+            .checkAndPrompt(); // повтор, пока первая ещё в полёте
+        await Future.wait([f1, f2]);
+
+        verify(() => repo.checkForUpdate(any())).called(1);
+        expect(controller.state, isA<UpdateAvailable>());
+      },
+    );
+
+    test('повторный вызов при UpdateAvailable не сбрасывает диалог', () async {
+      when(
+        () => repo.checkForUpdate(any()),
+      ).thenAnswer((_) async => Success(_manifest(versionCode: 5)));
       final controller = UpdateController(
-        config: _config(manifestUrl: ''),
+        config: _config,
         repo: repo,
         installer: installer,
         currentVersionCodeProvider: () async => 2,
       );
-
       await controller.checkAndPrompt();
+      expect(controller.state, isA<UpdateAvailable>());
 
-      verifyNever(() => repo.checkForUpdate(any()));
-      expect(controller.state, isA<UpdateIdle>());
+      await controller.checkAndPrompt(); // не должен перезапросить/сбросить
+
+      verify(() => repo.checkForUpdate(any())).called(1);
+      expect(controller.state, isA<UpdateAvailable>());
     });
   });
 
   group('downloadAndInstall', () {
     test('успех → Downloading → Installing', () async {
-      when(() => repo.checkForUpdate(any()))
-          .thenAnswer((_) async => Success(_manifest(versionCode: 5)));
+      when(
+        () => repo.checkForUpdate(any()),
+      ).thenAnswer((_) async => Success(_manifest(versionCode: 5)));
       final apkFile = File('test_apk');
-      when(() => repo.downloadApk(any(),
-              targetDir: any(named: 'targetDir'),
-              onProgress: any(named: 'onProgress')))
-          .thenAnswer((_) async => Success(apkFile));
+      when(
+        () => repo.downloadApk(
+          any(),
+          sha256: any(named: 'sha256'),
+          targetDir: any(named: 'targetDir'),
+          onProgress: any(named: 'onProgress'),
+        ),
+      ).thenAnswer((_) async => Success(apkFile));
       when(() => installer.installApk(any())).thenAnswer((_) async {});
       final controller = UpdateController(
-        config: _config(),
+        config: _config,
         repo: repo,
         installer: installer,
         currentVersionCodeProvider: () async => 2,
@@ -135,15 +178,75 @@ void main() {
       verify(() => installer.installApk(apkFile)).called(1);
     });
 
-    test('сбой скачивания → UpdateError', () async {
-      when(() => repo.checkForUpdate(any()))
-          .thenAnswer((_) async => Success(_manifest(versionCode: 5)));
-      when(() => repo.downloadApk(any(),
-              targetDir: any(named: 'targetDir'),
-              onProgress: any(named: 'onProgress')))
-          .thenAnswer((_) async => const Failure(NetworkError()));
+    test(
+      'невалидный манифест (пустой sha256) → UpdateError без скачивания',
+      () async {
+        when(() => repo.checkForUpdate(any())).thenAnswer(
+          (_) async => Success(_manifest(versionCode: 5, sha256: '')),
+        );
+        final controller = UpdateController(
+          config: _config,
+          repo: repo,
+          installer: installer,
+          currentVersionCodeProvider: () async => 2,
+        );
+        await controller.checkAndPrompt();
+
+        await controller.downloadAndInstall();
+
+        expect(controller.state, isA<UpdateError>());
+        verifyNever(
+          () => repo.downloadApk(
+            any(),
+            sha256: any(named: 'sha256'),
+            targetDir: any(named: 'targetDir'),
+            onProgress: any(named: 'onProgress'),
+          ),
+        );
+        verifyNever(() => installer.installApk(any()));
+      },
+    );
+
+    test('SHA-256 несовпадение → UpdateError', () async {
+      when(
+        () => repo.checkForUpdate(any()),
+      ).thenAnswer((_) async => Success(_manifest(versionCode: 5)));
+      when(
+        () => repo.downloadApk(
+          any(),
+          sha256: any(named: 'sha256'),
+          targetDir: any(named: 'targetDir'),
+          onProgress: any(named: 'onProgress'),
+        ),
+      ).thenAnswer((_) async => const Failure(IntegrityError()));
       final controller = UpdateController(
-        config: _config(),
+        config: _config,
+        repo: repo,
+        installer: installer,
+        currentVersionCodeProvider: () async => 2,
+      );
+      await controller.checkAndPrompt();
+
+      await controller.downloadAndInstall();
+
+      expect(controller.state, isA<UpdateError>());
+      verifyNever(() => installer.installApk(any()));
+    });
+
+    test('сбой скачивания → UpdateError', () async {
+      when(
+        () => repo.checkForUpdate(any()),
+      ).thenAnswer((_) async => Success(_manifest(versionCode: 5)));
+      when(
+        () => repo.downloadApk(
+          any(),
+          sha256: any(named: 'sha256'),
+          targetDir: any(named: 'targetDir'),
+          onProgress: any(named: 'onProgress'),
+        ),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      final controller = UpdateController(
+        config: _config,
         repo: repo,
         installer: installer,
         currentVersionCodeProvider: () async => 2,
@@ -157,15 +260,20 @@ void main() {
     });
 
     test('сбой установки (PlatformException) → UpdateError', () async {
-      when(() => repo.checkForUpdate(any()))
-          .thenAnswer((_) async => Success(_manifest(versionCode: 5)));
-      when(() => repo.downloadApk(any(),
-              targetDir: any(named: 'targetDir'),
-              onProgress: any(named: 'onProgress')))
-          .thenAnswer((_) async => Success(File('test_apk')));
+      when(
+        () => repo.checkForUpdate(any()),
+      ).thenAnswer((_) async => Success(_manifest(versionCode: 5)));
+      when(
+        () => repo.downloadApk(
+          any(),
+          sha256: any(named: 'sha256'),
+          targetDir: any(named: 'targetDir'),
+          onProgress: any(named: 'onProgress'),
+        ),
+      ).thenAnswer((_) async => Success(File('test_apk')));
       when(() => installer.installApk(any())).thenThrow(Exception('denied'));
       final controller = UpdateController(
-        config: _config(),
+        config: _config,
         repo: repo,
         installer: installer,
         currentVersionCodeProvider: () async => 2,
@@ -178,20 +286,45 @@ void main() {
     });
   });
 
-  test('skip → UpdateIdle', () async {
-    when(() => repo.checkForUpdate(any()))
-        .thenAnswer((_) async => Success(_manifest(versionCode: 5)));
-    final controller = UpdateController(
-      config: _config(),
-      repo: repo,
-      installer: installer,
-      currentVersionCodeProvider: () async => 2,
+  group('required', () {
+    test(
+      'required=false → манифест доступен, skip сбрасывает в idle',
+      () async {
+        when(() => repo.checkForUpdate(any())).thenAnswer(
+          (_) async => Success(_manifest(versionCode: 5, required: false)),
+        );
+        final controller = UpdateController(
+          config: _config,
+          repo: repo,
+          installer: installer,
+          currentVersionCodeProvider: () async => 2,
+        );
+        await controller.checkAndPrompt();
+
+        expect(
+          (controller.state as UpdateAvailable).manifest.required,
+          isFalse,
+        );
+
+        controller.skip();
+
+        expect(controller.state, isA<UpdateIdle>());
+      },
     );
-    await controller.checkAndPrompt();
-    expect(controller.state, isA<UpdateAvailable>());
 
-    controller.skip();
+    test('required=true → манифест доступен с флагом обязательности', () async {
+      when(() => repo.checkForUpdate(any())).thenAnswer(
+        (_) async => Success(_manifest(versionCode: 5, required: true)),
+      );
+      final controller = UpdateController(
+        config: _config,
+        repo: repo,
+        installer: installer,
+        currentVersionCodeProvider: () async => 2,
+      );
+      await controller.checkAndPrompt();
 
-    expect(controller.state, isA<UpdateIdle>());
+      expect((controller.state as UpdateAvailable).manifest.required, isTrue);
+    });
   });
 }
