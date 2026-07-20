@@ -1,7 +1,7 @@
 name: tsd_inventory
 description: Инвентаризация ТМЦ для терминала сбора данных M3 SL20.
 publish_to: 'none'
-version: 0.2.5+7
+version: 0.2.6+8
 
 environment:
   sdk: ^3.12.2

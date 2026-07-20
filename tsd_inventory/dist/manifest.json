@@ -2,7 +2,7 @@
   "versionName": "0.2.6",
   "versionCode": 8,
   "apkKey": "releases/tsd-inventory-0.2.6-8.apk",
-  "sha256": "<sha256 APK в нижнем регистре>",
-  "releaseNotes": "Описание изменений",
+  "sha256": "cf1725ebecb186b54c95af1e5bb2251a82a0aee8e9640fd953f8fb7d7f96a9ff",
+  "releaseNotes": "Тест автообновления 0.2.6: миграция на защищённый HTTP-сервис 1С.",
   "required": false
 }
