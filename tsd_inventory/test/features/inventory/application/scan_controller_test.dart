@@ -15,7 +15,11 @@ class _MockDb extends Mock implements AppDatabase {}
 
 class _MockFeedback extends Mock implements FeedbackService {}
 
-DocTableRow _row(int line, {List<String> barcodes = const []}) => DocTableRow(
+DocTableRow _row(
+  int line, {
+  List<String> barcodes = const [],
+  int qtyActual = 0,
+}) => DocTableRow(
   lineNumber: line,
   inventoryNumber: '',
   nomenclature: 'N$line',
@@ -25,7 +29,7 @@ DocTableRow _row(int line, {List<String> barcodes = const []}) => DocTableRow(
   seriesStatus: '0',
   fio: '',
   qtyAccounting: 1,
-  qtyActual: 0,
+  qtyActual: qtyActual,
   action: '',
   barcodes: barcodes,
 );
@@ -266,6 +270,58 @@ void main() {
       _row(1, barcodes: ['444']),
     ]);
     expect((await controller.onScanned('444')), isA<Found>());
+  });
+
+  group('hydrateFromDb', () {
+    test('локальный ноль не затирает положительный факт из 1С', () async {
+      when(() => db.getScanProgress('АЕ-1')).thenAnswer(
+        (_) async => {
+          1: ScanProgressData(
+            docCode: 'АЕ-1',
+            lineNumber: 1,
+            nomenclatureCode: 'k1',
+            qtyActual: 0,
+            action: '',
+            updatedAt: DateTime(2026),
+          ),
+        },
+      );
+      final controller = _controller(
+        repo: repo,
+        db: db,
+        feedback: feedback,
+        rows: [_row(1, qtyActual: 3)],
+      );
+
+      await controller.hydrateFromDb();
+
+      expect(controller.rows.single.qtyActual, 3);
+    });
+
+    test('положительный локальный прогресс восстанавливается поверх 1С', () async {
+      when(() => db.getScanProgress('АЕ-1')).thenAnswer(
+        (_) async => {
+          1: ScanProgressData(
+            docCode: 'АЕ-1',
+            lineNumber: 1,
+            nomenclatureCode: 'k1',
+            qtyActual: 2,
+            action: '',
+            updatedAt: DateTime(2026),
+          ),
+        },
+      );
+      final controller = _controller(
+        repo: repo,
+        db: db,
+        feedback: feedback,
+        rows: [_row(1, qtyActual: 0)],
+      );
+
+      await controller.hydrateFromDb();
+
+      expect(controller.rows.single.qtyActual, 2);
+    });
   });
 
   group('commit', () {

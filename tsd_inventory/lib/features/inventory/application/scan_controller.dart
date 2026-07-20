@@ -167,8 +167,15 @@ class ScanController extends ChangeNotifier {
     for (var i = 0; i < rows.length; i++) {
       final s = saved[rows[i].lineNumber];
       if (s != null) {
+        final serverActual = rows[i].qtyActual;
+        // Нулевая локальная запись не должна скрывать факт, уже записанный
+        // в 1С. Положительный локальный факт остаётся приоритетным: это может
+        // быть ещё не отправленный прогресс текущего ТСД.
+        final restoredActual = s.qtyActual == 0 && serverActual > 0
+            ? serverActual
+            : s.qtyActual;
         rows[i] = rows[i].copyWith(
-          qtyActual: s.qtyActual,
+          qtyActual: restoredActual,
           action: s.action ?? '',
         );
       }

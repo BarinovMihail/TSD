@@ -108,15 +108,13 @@ class InventoryScreenController extends ChangeNotifier {
     final scan = this.scan;
     if (scan == null) return const Success(null);
     final res = await repo.getTable(docCode);
-    res.maybeWhen(
-      onValue: (rows) async {
-        scan.replaceRows(rows);
-        await scan.hydrateFromDb();
-        notifyListeners();
-      },
-      orElse: (_) {},
-    );
-    return res;
+    if (res is Failure<List<DocTableRow>>) return Failure(res.error);
+
+    final rows = (res as Success<List<DocTableRow>>).value;
+    scan.replaceRows(rows);
+    await scan.hydrateFromDb();
+    notifyListeners();
+    return const Success(null);
   }
 
   /// Добавить штрихкод в 1С (POST /newBarcode) и перезагрузить документ.
@@ -185,13 +183,14 @@ class InventoryScreenController extends ChangeNotifier {
     }
     // Сетевая ошибка — 1С могла успеть записать. Проверяем перезагрузкой.
     final reloadRes = await repo.getTable(docCode);
-    reloadRes.maybeWhen(
-      onValue: (rows) {
-        scan?.replaceRows(rows);
-        notifyListeners();
-      },
-      orElse: (_) {},
-    );
+    if (reloadRes is Success<List<DocTableRow>>) {
+      final scan = this.scan;
+      if (scan != null) {
+        scan.replaceRows(reloadRes.value);
+        await scan.hydrateFromDb();
+      }
+      notifyListeners();
+    }
     final ok =
         reloadRes is Success &&
         verifyAfterNetworkError(scan?.rows ?? const []);

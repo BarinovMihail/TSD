@@ -16,7 +16,10 @@ class _MockDb extends Mock implements AppDatabase {}
 
 class _MockFeedback extends Mock implements FeedbackService {}
 
-DocTableRow _row({List<String> barcodes = const []}) => DocTableRow(
+DocTableRow _row({
+  List<String> barcodes = const [],
+  int qtyActual = 0,
+}) => DocTableRow(
   lineNumber: 1,
   inventoryNumber: '',
   nomenclature: 'Монитор',
@@ -26,7 +29,7 @@ DocTableRow _row({List<String> barcodes = const []}) => DocTableRow(
   seriesStatus: '0',
   fio: '',
   qtyAccounting: 1,
-  qtyActual: 0,
+  qtyActual: qtyActual,
   action: '',
   barcodes: barcodes,
 );
@@ -70,6 +73,30 @@ void main() {
     when(
       () => db.getScanProgress(any()),
     ).thenAnswer((_) async => <int, ScanProgressData>{});
+  });
+
+  test('reload сохраняет серверный факт при локальной записи с нулём', () async {
+    when(() => repo.getTable('АЕ-1')).thenAnswer(
+      (_) async => Success([_row(qtyActual: 3)]),
+    );
+    when(() => db.getScanProgress('АЕ-1')).thenAnswer(
+      (_) async => {
+        1: ScanProgressData(
+          docCode: 'АЕ-1',
+          lineNumber: 1,
+          nomenclatureCode: '00-00000123',
+          qtyActual: 0,
+          action: '',
+          updatedAt: DateTime(2026),
+        ),
+      },
+    );
+    final ctrl = _controller(repo, db, feedback, _row());
+
+    final result = await ctrl.reload();
+
+    expect(result, isA<Success>());
+    expect(ctrl.scan!.rows.single.qtyActual, 3);
   });
 
   group('addBarcodeAndReload', () {
@@ -242,6 +269,40 @@ void main() {
       );
 
       expect(r.outcome, AddBarcodeOutcome.verifiedAfterTimeout);
+    });
+
+    test('после таймаута локальный ноль не скрывает серверный факт', () async {
+      when(
+        () => repo.addScannedBarcode(any(), any(), any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([
+          _row(barcodes: const ['0012345678905'], qtyActual: 3),
+        ]),
+      );
+      when(() => db.getScanProgress('АЕ-1')).thenAnswer(
+        (_) async => {
+          1: ScanProgressData(
+            docCode: 'АЕ-1',
+            lineNumber: 1,
+            nomenclatureCode: '00-00000123',
+            qtyActual: 0,
+            action: '',
+            updatedAt: DateTime(2026),
+          ),
+        },
+      );
+      final ctrl = _controller(repo, db, feedback, _row());
+
+      final r = await ctrl.addScannedBarcodeAndReload(
+        lineNumber: 1,
+        nomenclature: 'Монитор',
+        characteristic: 'Black',
+        barcode: '0012345678905',
+      );
+
+      expect(r.outcome, AddBarcodeOutcome.verifiedAfterTimeout);
+      expect(ctrl.scan!.rows.single.qtyActual, 3);
     });
 
     test('чужой новый ШК после таймаута не подтверждает операцию', () async {
