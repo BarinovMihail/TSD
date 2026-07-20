@@ -34,6 +34,11 @@ abstract final class AppStrings {
   static const docsTitle = 'Документы инвентаризации';
   static const docsEmpty = 'Документов не найдено';
   static const docsLoadError = 'Ошибка загрузки документов';
+  static const searchDocument = 'Поиск по номеру документа';
+  static const clearSearch = 'Очистить поиск';
+  static const newestFirst = 'Сначала новые';
+  static const oldestFirst = 'Сначала старые';
+  static const docsSearchEmpty = 'Документы не найдены';
   static const docPosted = 'Проведён';
   static const docDraft = 'Черновик';
   static const orgLabel = 'Организация';

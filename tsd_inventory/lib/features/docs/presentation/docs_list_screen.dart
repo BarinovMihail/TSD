@@ -12,6 +12,7 @@ import '../../inventory/application/providers.dart';
 import '../application/completed_docs_provider.dart';
 import '../application/docs_controller.dart';
 import '../domain/doc_list_item.dart';
+import '../domain/docs_list_filter.dart';
 
 class DocsListScreen extends ConsumerStatefulWidget {
   const DocsListScreen({super.key});
@@ -21,6 +22,10 @@ class DocsListScreen extends ConsumerStatefulWidget {
 }
 
 class _DocsListScreenState extends ConsumerState<DocsListScreen> {
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+  DocsSortOrder _sortOrder = DocsSortOrder.newestFirst;
+
   /// Показан ли уже диалог обновления в этой сессии. Без этого флага повторный
   /// вход на экран или rebuild могли бы показать второй диалог.
   bool _updateDialogShown = false;
@@ -75,6 +80,7 @@ class _DocsListScreenState extends ConsumerState<DocsListScreen> {
     // dispose-ится самим Riverpod при исчезновении зависимостей — снятие
     // слушателя с уже disposed ChangeNotifier безопасно (Flutter не бросает).
     _updateController?.removeListener(_onUpdateStateChanged);
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -130,26 +136,99 @@ class _DocsListScreenState extends ConsumerState<DocsListScreen> {
               ),
             );
           }
-          return RefreshIndicator(
-            onRefresh: () =>
-                ref.read(docsControllerProvider.notifier).refresh(),
-            child: ListView.builder(
-              itemCount: docs.length,
-              itemBuilder: (context, i) {
-                final completed =
-                    asyncCompleted.maybeWhen(
-                      data: (s) => s.contains(docs[i].number),
-                      orElse: () => false,
-                    ) ||
-                    docs[i].posted;
-                return _DocCard(
-                  doc: docs[i],
-                  completed: completed,
-                  onTap: () => context.go('/docs/${docs[i].number}'),
-                  onUnmark: () => _confirmUnmark(context, ref, docs[i].number),
-                );
-              },
-            ),
+          final visibleDocs = filterAndSortDocs(
+            docs,
+            query: _searchQuery,
+            sortOrder: _sortOrder,
+          );
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                child: TextField(
+                  controller: _searchController,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    labelText: AppStrings.searchDocument,
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _searchQuery.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: AppStrings.clearSearch,
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _searchQuery = '');
+                            },
+                          ),
+                  ),
+                  onChanged: (value) => setState(() => _searchQuery = value),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      ChoiceChip(
+                        label: const Text(AppStrings.newestFirst),
+                        selected: _sortOrder == DocsSortOrder.newestFirst,
+                        onSelected: (_) => setState(
+                          () => _sortOrder = DocsSortOrder.newestFirst,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text(AppStrings.oldestFirst),
+                        selected: _sortOrder == DocsSortOrder.oldestFirst,
+                        onSelected: (_) => setState(
+                          () => _sortOrder = DocsSortOrder.oldestFirst,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () =>
+                      ref.read(docsControllerProvider.notifier).refresh(),
+                  child: visibleDocs.isEmpty
+                      ? ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          children: const [
+                            SizedBox(height: 96),
+                            Center(
+                              child: Text(
+                                AppStrings.docsSearchEmpty,
+                                style: TextStyle(fontSize: 18),
+                              ),
+                            ),
+                          ],
+                        )
+                      : ListView.builder(
+                          itemCount: visibleDocs.length,
+                          itemBuilder: (context, i) {
+                            final doc = visibleDocs[i];
+                            final completed =
+                                asyncCompleted.maybeWhen(
+                                  data: (s) => s.contains(doc.number),
+                                  orElse: () => false,
+                                ) ||
+                                doc.posted;
+                            return _DocCard(
+                              doc: doc,
+                              completed: completed,
+                              onTap: () => context.go('/docs/${doc.number}'),
+                              onUnmark: () =>
+                                  _confirmUnmark(context, ref, doc.number),
+                            );
+                          },
+                        ),
+                ),
+              ),
+            ],
           );
         },
       ),
