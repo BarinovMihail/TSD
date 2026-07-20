@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,6 +25,7 @@ class InventoryScreen extends ConsumerStatefulWidget {
 class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   late final KeyboardWedgeScanner _scanner;
   final _scanFocus = FocusNode();
+  Completer<String>? _barcodeCapture;
 
   @override
   void initState() {
@@ -42,6 +45,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
 
   @override
   void dispose() {
+    final capture = _barcodeCapture;
+    if (capture != null && !capture.isCompleted) capture.complete('');
     _scanner.dispose();
     _scanFocus.dispose();
     super.dispose();
@@ -51,6 +56,15 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       ref.read(inventoryScreenControllerProvider(widget.docCode).notifier).scan;
 
   Future<void> _onCode(String code) async {
+    // В режиме привязки следующий код отдаётся окну добавления ШК и не
+    // увеличивает фактическое количество позиции.
+    final capture = _barcodeCapture;
+    if (capture != null) {
+      final trimmed = code.trim();
+      if (trimmed.isNotEmpty && !capture.isCompleted) capture.complete(trimmed);
+      return;
+    }
+
     final scan = _scan;
     if (scan == null) return;
     final outcome = await scan.onScanned(code);
@@ -93,9 +107,45 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     showDialog<void>(
       context: context,
       builder: (ctx) => row.hasBarcodes
-          ? ViewBarcodesDialog(lineNumber: row.lineNumber, ctrl: ctrl)
-          : AddBarcodeDialog(row: row, ctrl: ctrl),
+          ? ViewBarcodesDialog(
+              lineNumber: row.lineNumber,
+              ctrl: ctrl,
+              onCaptureBarcode: _captureBarcodeFromItem,
+            )
+          : AddBarcodeDialog(
+              row: row,
+              ctrl: ctrl,
+              onCaptureBarcode: _captureBarcodeFromItem,
+            ),
     );
+  }
+
+  /// Временно переключает аппаратный сканер из режима подсчёта в режим
+  /// получения штрихкода, который нужно привязать к выбранной строке.
+  Future<String?> _captureBarcodeFromItem(DocTableRow row) async {
+    if (_barcodeCapture != null) return null;
+    final capture = Completer<String>();
+    _barcodeCapture = capture;
+    try {
+      final value = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => _BarcodeCaptureDialog(
+          row: row,
+          codeFuture: capture.future,
+        ),
+      );
+      final normalized = value?.trim();
+      return normalized == null || normalized.isEmpty ? null : normalized;
+    } finally {
+      if (identical(_barcodeCapture, capture)) _barcodeCapture = null;
+      if (!capture.isCompleted) capture.complete('');
+      if (mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _scanFocus.requestFocus();
+        });
+      }
+    }
   }
 
   void _showAmbiguous(List<DocTableRow> candidates) {
@@ -391,6 +441,69 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _BarcodeCaptureDialog extends StatefulWidget {
+  const _BarcodeCaptureDialog({required this.row, required this.codeFuture});
+
+  final DocTableRow row;
+  final Future<String> codeFuture;
+
+  @override
+  State<_BarcodeCaptureDialog> createState() => _BarcodeCaptureDialogState();
+}
+
+class _BarcodeCaptureDialogState extends State<_BarcodeCaptureDialog> {
+  @override
+  void initState() {
+    super.initState();
+    widget.codeFuture.then((code) {
+      if (mounted) Navigator.of(context).pop(code);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text(AppStrings.scanBarcodeTitle),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.row.nomenclature,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+          if (widget.row.characteristic.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(widget.row.characteristic),
+            ),
+          const SizedBox(height: 16),
+          const Row(
+            children: [
+              SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              SizedBox(width: 12),
+              Expanded(child: Text(AppStrings.scanBarcodePrompt)),
+            ],
+          ),
+        ],
+      ),
+      actions: [
+        OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(56),
+          ),
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text(AppStrings.cancel),
+        ),
+      ],
     );
   }
 }

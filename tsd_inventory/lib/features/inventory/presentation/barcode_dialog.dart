@@ -28,9 +28,15 @@ void _showBarcodeAdded(BuildContext context) {
 /// штрихкод берётся из обновлённого массива «Штрихкоды». Окно не закрывается
 /// до получения результата отправки.
 class AddBarcodeDialog extends ConsumerStatefulWidget {
-  const AddBarcodeDialog({super.key, required this.row, required this.ctrl});
+  const AddBarcodeDialog({
+    super.key,
+    required this.row,
+    required this.ctrl,
+    this.onCaptureBarcode,
+  });
   final DocTableRow row;
   final InventoryScreenController ctrl;
+  final Future<String?> Function(DocTableRow row)? onCaptureBarcode;
 
   @override
   ConsumerState<AddBarcodeDialog> createState() => _AddBarcodeDialogState();
@@ -118,6 +124,49 @@ class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
     }
   }
 
+  Future<void> _addScanned() async {
+    if (_sending) return;
+    final barcode = await widget.onCaptureBarcode?.call(widget.row);
+    if (!mounted || barcode == null || barcode.trim().isEmpty) return;
+
+    setState(() => _sending = true);
+    final result = await widget.ctrl.addScannedBarcodeAndReload(
+      lineNumber: widget.row.lineNumber,
+      nomenclature: widget.row.nomenclature,
+      characteristic: _selected ?? widget.row.characteristic,
+      barcode: barcode,
+    );
+    if (!mounted) return;
+    switch (result.outcome) {
+      case AddBarcodeOutcome.done:
+      case AddBarcodeOutcome.verifiedAfterTimeout:
+        _showBarcodeAdded(context);
+        if (mounted) Navigator.of(context).pop(true);
+      case AddBarcodeOutcome.failed:
+        setState(() => _sending = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.error?.userMessage ?? AppStrings.errGeneric),
+            action: SnackBarAction(
+              label: AppStrings.retry,
+              onPressed: _addScanned,
+            ),
+          ),
+        );
+      case AddBarcodeOutcome.inconclusive:
+        setState(() => _sending = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(AppStrings.errNetwork),
+            action: SnackBarAction(
+              label: AppStrings.retry,
+              onPressed: _addScanned,
+            ),
+          ),
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -145,7 +194,25 @@ class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            FilledButton(
+            if (widget.onCaptureBarcode != null) ...[
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(60),
+                  textStyle: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onPressed: _canSubmit ? (_sending ? null : _addScanned) : null,
+                icon: const Icon(Icons.qr_code_scanner),
+                label: const Text(AppStrings.scanBarcodeFromItem),
+              ),
+              const SizedBox(height: 12),
+            ],
+            FilledButton.tonal(
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(60),
                 textStyle: const TextStyle(
@@ -259,9 +326,11 @@ class ViewBarcodesDialog extends ConsumerStatefulWidget {
     super.key,
     required this.lineNumber,
     required this.ctrl,
+    this.onCaptureBarcode,
   });
   final int lineNumber;
   final InventoryScreenController ctrl;
+  final Future<String?> Function(DocTableRow row)? onCaptureBarcode;
 
   @override
   ConsumerState<ViewBarcodesDialog> createState() => _ViewBarcodesDialogState();
@@ -311,6 +380,50 @@ class _ViewBarcodesDialogState extends ConsumerState<ViewBarcodesDialog> {
           SnackBar(
             content: const Text(AppStrings.errNetwork),
             action: SnackBarAction(label: AppStrings.retry, onPressed: _addNew),
+          ),
+        );
+    }
+  }
+
+  Future<void> _addScanned() async {
+    if (_sending) return;
+    final row = _row;
+    if (row == null) return;
+    final barcode = await widget.onCaptureBarcode?.call(row);
+    if (!mounted || barcode == null || barcode.trim().isEmpty) return;
+
+    setState(() => _sending = true);
+    final result = await widget.ctrl.addScannedBarcodeAndReload(
+      lineNumber: row.lineNumber,
+      nomenclature: row.nomenclature,
+      characteristic: row.characteristic,
+      barcode: barcode,
+    );
+    if (!mounted) return;
+    setState(() => _sending = false);
+    switch (result.outcome) {
+      case AddBarcodeOutcome.done:
+      case AddBarcodeOutcome.verifiedAfterTimeout:
+        _showBarcodeAdded(context);
+        break;
+      case AddBarcodeOutcome.failed:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.error?.userMessage ?? AppStrings.errGeneric),
+            action: SnackBarAction(
+              label: AppStrings.retry,
+              onPressed: _addScanned,
+            ),
+          ),
+        );
+      case AddBarcodeOutcome.inconclusive:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(AppStrings.errNetwork),
+            action: SnackBarAction(
+              label: AppStrings.retry,
+              onPressed: _addScanned,
+            ),
           ),
         );
     }
@@ -376,7 +489,25 @@ class _ViewBarcodesDialogState extends ConsumerState<ViewBarcodesDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            FilledButton(
+            if (widget.onCaptureBarcode != null) ...[
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(60),
+                  textStyle: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onPressed: _sending ? null : _addScanned,
+                icon: const Icon(Icons.qr_code_scanner),
+                label: const Text(AppStrings.scanBarcodeFromItem),
+              ),
+              const SizedBox(height: 12),
+            ],
+            FilledButton.tonal(
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(60),
                 textStyle: const TextStyle(

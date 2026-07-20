@@ -92,6 +92,9 @@ abstract final class AppStrings {
   static const addBarcode = 'Добавить штрихкод';
   static const barcodeAddedSuccess = 'Штрихкод успешно добавлен';
   static const addNewBarcode = 'Добавить новый штрихкод';
+  static const scanBarcodeFromItem = 'Сканировать ШК с товара';
+  static const scanBarcodeTitle = 'Сканирование штрихкода';
+  static const scanBarcodePrompt = 'Отсканируйте штрихкод на товаре';
   static const close = 'Закрыть';
   static const characteristicLabel = 'Характеристика';
   static const withoutCharacteristic = 'Без характеристики';

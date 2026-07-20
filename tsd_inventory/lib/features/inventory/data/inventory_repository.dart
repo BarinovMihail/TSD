@@ -125,11 +125,27 @@ class InventoryRepository {
   Future<Result<void>> addBarcode(
     String nomenclature,
     String characteristic,
-  ) async {
+  ) => _addBarcode(nomenclature, characteristic);
+
+  /// Привязка уже существующего штрихкода с упаковки к позиции в 1С.
+  /// Использует тот же POST /newBarcode, но дополнительно передаёт поле
+  /// «Штрихкод». При его наличии 1С не генерирует новый EAN-13.
+  Future<Result<void>> addScannedBarcode(
+    String nomenclature,
+    String characteristic,
+    String barcode,
+  ) => _addBarcode(nomenclature, characteristic, barcode: barcode.trim());
+
+  Future<Result<void>> _addBarcode(
+    String nomenclature,
+    String characteristic, {
+    String? barcode,
+  }) async {
     const path = 'hs/inventory/newBarcode';
     final body = {
       'Номенклатура': nomenclature,
       'Характеристика': characteristic,
+      if (barcode != null) 'Штрихкод': barcode,
     };
     try {
       await _client.postJson<dynamic>(

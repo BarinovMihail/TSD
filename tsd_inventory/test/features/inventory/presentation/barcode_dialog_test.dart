@@ -12,6 +12,7 @@ import 'package:tsd_inventory/features/inventory/data/inventory_repository.dart'
 import 'package:tsd_inventory/features/inventory/domain/barcode_matcher.dart';
 import 'package:tsd_inventory/features/inventory/domain/doc_table_row.dart';
 import 'package:tsd_inventory/features/inventory/presentation/barcode_dialog.dart';
+import 'package:tsd_inventory/l10n/app_strings.dart';
 
 class _MockRepo extends Mock implements InventoryRepository {}
 
@@ -364,6 +365,49 @@ void main() {
       // После перезагрузки в списке появился новый штрихкод.
       expect(find.text('444'), findsOneWidget);
       expect(find.text('Штрихкод успешно добавлен'), findsOneWidget);
+    });
+
+    testWidgets('сканирование с товара → POST содержит считанный ШК', (
+      tester,
+    ) async {
+      when(
+        () => repo.addScannedBarcode(any(), any(), any()),
+      ).thenAnswer((_) async => const Success(null));
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([
+          _row(barcodes: const ['111', '0012345678905']),
+        ]),
+      );
+      final ctrl = _controller(
+        repo,
+        db,
+        feedback,
+        _row(characteristic: 'Black', barcodes: const ['111']),
+      );
+
+      await tester.pumpWidget(
+        wrap(
+          ViewBarcodesDialog(
+            lineNumber: 1,
+            ctrl: ctrl,
+            onCaptureBarcode: (_) async => '0012345678905',
+          ),
+          ctrl,
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.text(AppStrings.scanBarcodeFromItem));
+      await tester.pumpAndSettle();
+
+      verify(
+        () => repo.addScannedBarcode(
+          'Монитор',
+          'Black',
+          '0012345678905',
+        ),
+      ).called(1);
+      expect(find.text('0012345678905'), findsOneWidget);
     });
   });
 }

@@ -194,4 +194,75 @@ void main() {
       },
     );
   });
+
+  group('addScannedBarcodeAndReload', () {
+    test('передаёт считанный ШК и перезагружает документ', () async {
+      when(
+        () => repo.addScannedBarcode(any(), any(), any()),
+      ).thenAnswer((_) async => const Success(null));
+      when(
+        () => repo.getTable(any()),
+      ).thenAnswer((_) async => const Success([]));
+      final ctrl = _controller(repo, db, feedback, _row());
+
+      final r = await ctrl.addScannedBarcodeAndReload(
+        lineNumber: 1,
+        nomenclature: 'Монитор',
+        characteristic: 'Black',
+        barcode: ' 0012345678905 ',
+      );
+
+      expect(r.outcome, AddBarcodeOutcome.done);
+      verify(
+        () => repo.addScannedBarcode(
+          'Монитор',
+          'Black',
+          '0012345678905',
+        ),
+      ).called(1);
+      verify(() => repo.getTable('АЕ-1')).called(1);
+    });
+
+    test('после таймаута проверяет конкретный ШК у конкретной строки', () async {
+      when(
+        () => repo.addScannedBarcode(any(), any(), any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([
+          _row(barcodes: const ['0012345678905']),
+        ]),
+      );
+      final ctrl = _controller(repo, db, feedback, _row());
+
+      final r = await ctrl.addScannedBarcodeAndReload(
+        lineNumber: 1,
+        nomenclature: 'Монитор',
+        characteristic: 'Black',
+        barcode: '0012345678905',
+      );
+
+      expect(r.outcome, AddBarcodeOutcome.verifiedAfterTimeout);
+    });
+
+    test('чужой новый ШК после таймаута не подтверждает операцию', () async {
+      when(
+        () => repo.addScannedBarcode(any(), any(), any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([
+          _row(barcodes: const ['ДРУГОЙ']),
+        ]),
+      );
+      final ctrl = _controller(repo, db, feedback, _row());
+
+      final r = await ctrl.addScannedBarcodeAndReload(
+        lineNumber: 1,
+        nomenclature: 'Монитор',
+        characteristic: 'Black',
+        barcode: '0012345678905',
+      );
+
+      expect(r.outcome, AddBarcodeOutcome.inconclusive);
+    });
+  });
 }

@@ -137,6 +137,42 @@ class InventoryScreenController extends ChangeNotifier {
     required Set<String> prevBarcodes,
   }) async {
     final res = await repo.addBarcode(nomenclature, characteristic);
+    return _finishBarcodeAdd(
+      res,
+      verifyAfterNetworkError: (rows) => _hasNewBarcode(rows, prevBarcodes),
+    );
+  }
+
+  /// Привязать к строке уже нанесённый на товар штрихкод и перечитать
+  /// документ. В отличие от генерации после сетевой ошибки проверяем
+  /// конкретный штрихкод у конкретной строки.
+  Future<({AddBarcodeOutcome outcome, ApiError? error})>
+  addScannedBarcodeAndReload({
+    required int lineNumber,
+    required String nomenclature,
+    required String characteristic,
+    required String barcode,
+  }) async {
+    final normalized = barcode.trim();
+    final res = await repo.addScannedBarcode(
+      nomenclature,
+      characteristic,
+      normalized,
+    );
+    return _finishBarcodeAdd(
+      res,
+      verifyAfterNetworkError: (rows) => _rowHasBarcode(
+        rows,
+        lineNumber: lineNumber,
+        barcode: normalized,
+      ),
+    );
+  }
+
+  Future<({AddBarcodeOutcome outcome, ApiError? error})> _finishBarcodeAdd(
+    Result<void> res, {
+    required bool Function(List<DocTableRow> rows) verifyAfterNetworkError,
+  }) async {
     // Успех POST → стандартная перезагрузка.
     if (res is Success) {
       await reload();
@@ -158,7 +194,7 @@ class InventoryScreenController extends ChangeNotifier {
     );
     final ok =
         reloadRes is Success &&
-        _hasNewBarcode(scan?.rows ?? const [], prevBarcodes);
+        verifyAfterNetworkError(scan?.rows ?? const []);
     return (
       outcome: ok
           ? AddBarcodeOutcome.verifiedAfterTimeout
@@ -173,6 +209,18 @@ class InventoryScreenController extends ChangeNotifier {
       for (final b in r.barcodes) {
         if (!prev.contains(b)) return true;
       }
+    }
+    return false;
+  }
+
+  bool _rowHasBarcode(
+    List<DocTableRow> rows, {
+    required int lineNumber,
+    required String barcode,
+  }) {
+    for (final row in rows) {
+      if (row.lineNumber != lineNumber) continue;
+      return row.barcodes.any((value) => value.trim() == barcode);
     }
     return false;
   }

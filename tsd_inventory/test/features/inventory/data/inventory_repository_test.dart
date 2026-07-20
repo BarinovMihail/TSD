@@ -309,6 +309,38 @@ void main() {
       expect((captured[1] as Map<String, dynamic>)['Характеристика'], '');
     });
 
+    test('отсканированный ШК передаётся в том же запросе', () async {
+      when(
+        () => client.postJson<dynamic>(
+          any(),
+          body: any(named: 'body'),
+          receiveTimeout: any(named: 'receiveTimeout'),
+        ),
+      ).thenAnswer((_) async => _okResponse<dynamic>());
+      final repo = InventoryRepository(client: client, db: db);
+
+      final res = await repo.addScannedBarcode(
+        'Монитор',
+        'Black',
+        ' 0012345678905 ',
+      );
+
+      expect(res, isA<Success>());
+      final captured = verify(
+        () => client.postJson<dynamic>(
+          captureAny(),
+          body: captureAny(named: 'body'),
+          receiveTimeout: any(named: 'receiveTimeout'),
+        ),
+      ).captured;
+      expect(captured[0], 'hs/inventory/newBarcode');
+      expect(captured[1], {
+        'Номенклатура': 'Монитор',
+        'Характеристика': 'Black',
+        'Штрихкод': '0012345678905',
+      });
+    });
+
     test('сетевая ошибка Dio → Failure', () async {
       when(
         () => client.postJson<dynamic>(
