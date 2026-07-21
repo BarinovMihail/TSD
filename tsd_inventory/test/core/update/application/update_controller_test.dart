@@ -284,6 +284,51 @@ void main() {
 
       expect(controller.state, isA<UpdateError>());
     });
+
+    test('плашка получает свежую apkUrl перед скачиванием', () async {
+      var manifestRequest = 0;
+      when(() => repo.checkForUpdate(any())).thenAnswer((_) async {
+        manifestRequest++;
+        return Success(
+          _manifest(
+            versionCode: 5,
+            apkUrl: manifestRequest == 1
+                ? 'https://storage.example/expired.apk'
+                : 'https://storage.example/fresh.apk',
+          ),
+        );
+      });
+      final apkFile = File('test_apk');
+      when(
+        () => repo.downloadApk(
+          any(),
+          sha256: any(named: 'sha256'),
+          targetDir: any(named: 'targetDir'),
+          onProgress: any(named: 'onProgress'),
+        ),
+      ).thenAnswer((_) async => Success(apkFile));
+      when(() => installer.installApk(any())).thenAnswer((_) async {});
+      final controller = UpdateController(
+        config: _config,
+        repo: repo,
+        installer: installer,
+        currentVersionCodeProvider: () async => 2,
+      );
+      await controller.checkAndPrompt();
+
+      await controller.downloadLatestAndInstall();
+
+      verify(() => repo.checkForUpdate(any())).called(2);
+      verify(
+        () => repo.downloadApk(
+          'https://storage.example/fresh.apk',
+          sha256: any(named: 'sha256'),
+          targetDir: any(named: 'targetDir'),
+          onProgress: any(named: 'onProgress'),
+        ),
+      ).called(1);
+      verify(() => installer.installApk(apkFile)).called(1);
+    });
   });
 
   group('required', () {

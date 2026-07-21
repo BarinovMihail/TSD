@@ -80,6 +80,7 @@ abstract final class AppStrings {
   static String updateAvailableTitle(String version) =>
       'Доступна новая версия $version';
   static const updateNow = 'Обновить';
+  static const updateLater = 'Позже';
   static const skipUpdate = 'Пропустить';
   static const downloadingUpdate = 'Скачивание обновления…';
   static String updatePercent(int p) => '$p%';

@@ -178,6 +178,47 @@ class UpdateController extends ChangeNotifier {
     }
   }
 
+  /// Повторно запросить манифест и сразу начать установку.
+  ///
+  /// Плашка может оставаться на экране дольше, чем живёт подписанная
+  /// `apkUrl`. Поэтому перед скачиванием всегда получаем у 1С свежую
+  /// временную ссылку и ещё раз проверяем, что версия новее.
+  Future<void> downloadLatestAndInstall() async {
+    if (state is! UpdateAvailable && state is! UpdateError) return;
+
+    state = const UpdateChecking();
+    notifyListeners();
+
+    const path = 'hs/inventory/update';
+    final res = await _repo.checkForUpdate(path);
+    String? errorMessage;
+    final manifest = res.maybeWhen<VersionManifest?>(
+      onValue: (value) => value,
+      orElse: (value) {
+        errorMessage = value.userMessage;
+        return null;
+      },
+    );
+    if (manifest == null) {
+      state = UpdateError(
+        errorMessage ?? 'Не удалось получить обновление',
+      );
+      notifyListeners();
+      return;
+    }
+
+    final current = await _currentVersionCodeProvider();
+    if (!manifest.isNewerThan(current)) {
+      state = const UpdateIdle();
+      notifyListeners();
+      return;
+    }
+
+    state = UpdateAvailable(manifest);
+    notifyListeners();
+    await downloadAndInstall();
+  }
+
   /// Сброс к idle (например, пользователь нажал «Пропустить»). Доступен только
   /// для необязательных обновлений — UI прячет кнопку при `manifest.required`.
   void skip() {
