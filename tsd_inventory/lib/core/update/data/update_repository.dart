@@ -45,15 +45,20 @@ class UpdateRepository {
   final Dio _downloadDio;
 
   /// GET манифеста версий через защищённый endpoint 1С.
-  /// [endpointUrl] — обычно `AppConfig.inventoryPath('update')`.
+  ///
+  /// [path] — **относительный** путь внутри HTTP-сервиса 1С
+  /// (`hs/inventory/update`), НЕ полный URL. [DioClient] сам склеит его с
+  /// `baseUrl` и применит failover по хостам ERP. Передача полного URL здесь
+  /// привела бы к дублированию (`baseUrl + полный URL`) → 404.
+  ///
   /// Любая ошибка (сеть/парсинг/HTTP) оборачивается в [Failure], не валит
   /// приложение.
-  Future<Result<VersionManifest>> checkForUpdate(String endpointUrl) async {
-    if (endpointUrl.isEmpty) {
+  Future<Result<VersionManifest>> checkForUpdate(String path) async {
+    if (path.isEmpty) {
       return const Failure(NetworkError());
     }
     try {
-      final res = await _client.getJson<dynamic>(endpointUrl);
+      final res = await _client.getJson<dynamic>(path);
       final data = res.data is String
           ? jsonDecode(res.data as String)
           : res.data;

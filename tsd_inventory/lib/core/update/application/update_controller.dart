@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:logging/logging.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:tsd_inventory/core/config/app_config.dart';
 import 'package:tsd_inventory/core/network/dio_client.dart';
@@ -8,6 +9,8 @@ import 'package:tsd_inventory/core/update/data/update_repository.dart';
 import 'package:tsd_inventory/core/update/domain/version_manifest.dart';
 
 import '../../../features/auth/application/auth_controller.dart';
+
+final _log = Logger('update_controller');
 
 /// Состояние проверки обновлений.
 sealed class UpdateState {
@@ -93,10 +96,24 @@ class UpdateController extends ChangeNotifier {
     state = const UpdateChecking();
     notifyListeners();
 
-    final res = await _repo.checkForUpdate(_config.inventoryPath('update'));
+    // DioClient ожидает ОТНОСИТЕЛЬНЫЙ путь ('hs/inventory/...'), а не полный
+    // URL: он сам склеит его с baseUrl (+ failover по хостам). Поэтому здесь
+    // именно относительный путь, а не AppConfig.inventoryPath('update')
+    // (который вернул бы полный URL и при склейке получил бы дублирование).
+    const path = 'hs/inventory/update';
+    final res = await _repo.checkForUpdate(path);
     final manifest = res.maybeWhen<VersionManifest?>(
-      onValue: (m) => m,
-      orElse: (_) => null,
+      onValue: (m) {
+        _log.info(
+          'Манифест получен: versionCode=${m.versionCode} '
+          'versionName=${m.versionName} required=${m.required}',
+        );
+        return m;
+      },
+      orElse: (e) {
+        _log.warning('Манифест не получен: ${e.userMessage}');
+        return null;
+      },
     );
     if (manifest == null) {
       // Тихо глушим: проверка обновлений не должна мешать работе приложения.
@@ -105,6 +122,9 @@ class UpdateController extends ChangeNotifier {
       return;
     }
     final current = await _currentVersionCodeProvider();
+    _log.info(
+      'Сравнение версий: manifest=${manifest.versionCode} current=$current',
+    );
     state = manifest.isNewerThan(current)
         ? UpdateAvailable(manifest)
         : const UpdateIdle();

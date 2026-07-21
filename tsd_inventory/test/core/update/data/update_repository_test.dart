@@ -58,9 +58,7 @@ void main() {
       );
       final repo = UpdateRepository(client: a.client, downloadDio: Dio());
 
-      final res = await repo.checkForUpdate(
-        'http://test-host/hs/inventory/update',
-      );
+      final res = await repo.checkForUpdate('hs/inventory/update');
 
       expect(res, isA<Success>());
       final m = (res as Success).value;
@@ -83,7 +81,7 @@ void main() {
         );
         final repo = UpdateRepository(client: a.client, downloadDio: Dio());
 
-        await repo.checkForUpdate('http://test-host/hs/inventory/update');
+        await repo.checkForUpdate('hs/inventory/update');
 
         final req = a.adapter.requests.first;
         expect(req.headers['Authorization']?.startsWith('Basic '), isTrue);
@@ -108,9 +106,7 @@ void main() {
       );
       final repo = UpdateRepository(client: a.client, downloadDio: Dio());
 
-      final res = await repo.checkForUpdate(
-        'http://test-host/hs/inventory/update',
-      );
+      final res = await repo.checkForUpdate('hs/inventory/update');
 
       expect(res, isA<Failure>());
       expect((res as Failure).error, isA<NetworkError>());
@@ -128,9 +124,7 @@ void main() {
       );
       final repo = UpdateRepository(client: a.client, downloadDio: Dio());
 
-      final res = await repo.checkForUpdate(
-        'http://test-host/hs/inventory/update',
-      );
+      final res = await repo.checkForUpdate('hs/inventory/update');
 
       expect(res, isA<Failure>());
       expect((res as Failure).error, isA<AuthError>());
@@ -148,9 +142,7 @@ void main() {
       );
       final repo = UpdateRepository(client: a.client, downloadDio: Dio());
 
-      final res = await repo.checkForUpdate(
-        'http://test-host/hs/inventory/update',
-      );
+      final res = await repo.checkForUpdate('hs/inventory/update');
 
       expect(res, isA<Failure>());
       expect((res as Failure).error, isA<ServerError>());
@@ -167,12 +159,33 @@ void main() {
       );
       final repo = UpdateRepository(client: a.client, downloadDio: Dio());
 
-      final res = await repo.checkForUpdate(
-        'http://test-host/hs/inventory/update',
-      );
+      final res = await repo.checkForUpdate('hs/inventory/update');
 
       expect(res, isA<Failure>());
       expect((res as Failure).error, isA<ParseError>());
+    });
+
+    test('итоговый URL корректно склеен (нет дублирования baseUrl)', () async {
+      // Регрессия: относительный путь должен склеиваться с baseUrl один раз,
+      // а не дважды (раньше передавали полный URL → dio делал baseUrl+url).
+      final a = _Authed();
+      a.adapter.response = ResponseBody.fromString(
+        jsonEncode({}),
+        200,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+      final repo = UpdateRepository(client: a.client, downloadDio: Dio());
+
+      await repo.checkForUpdate('hs/inventory/update');
+
+      final req = a.adapter.requests.first;
+      // Склейка: 'http://test-host/erp/' + 'hs/inventory/update'
+      // → 'http://test-host/erp/hs/inventory/update' (ровно один baseUrl).
+      expect(req.path, 'http://test-host/erp/hs/inventory/update');
+      // baseUrl не должен встречаться дважды (регрессия найденного бага).
+      expect('http://test-host/erp/'.allMatches(req.path).length, 1);
     });
   });
 
