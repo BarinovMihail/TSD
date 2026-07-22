@@ -363,25 +363,47 @@ void main() {
     });
   });
 
-  group('deleteBarcode — GET /delete/{ШК}', () {
+  group('deleteBarcode — DELETE /delete/{ШК}', () {
     test('номер штрихкода trim-ится и URL-кодируется', () async {
       when(
-        () => client.getPlain(any()),
-      ).thenAnswer((_) async => _okResponse<String>());
+        () => client.deleteJson<dynamic>(any()),
+      ).thenAnswer(
+        (_) async => _jsonResponse<dynamic>({
+          'Штрихкод': 'ШК 12/34',
+          'Результат': 'Успешно удалено',
+        }),
+      );
       final repo = InventoryRepository(client: client, db: db);
 
       final res = await repo.deleteBarcode(' ШК 12/34 ');
 
       expect(res, isA<Success>());
       verify(
-        () => client.getPlain(
+        () => client.deleteJson<dynamic>(
           'hs/inventory/delete/%D0%A8%D0%9A%2012%2F34',
         ),
       ).called(1);
     });
 
+    test('проверяет результат из JSON-ответа', () async {
+      when(
+        () => client.deleteJson<dynamic>(any()),
+      ).thenAnswer(
+        (_) async => _jsonResponse<dynamic>({
+          'Штрихкод': '0012345678905',
+          'Результат': 'Не удалено',
+        }),
+      );
+      final repo = InventoryRepository(client: client, db: db);
+
+      final res = await repo.deleteBarcode('0012345678905');
+
+      expect(res, isA<Failure>());
+      expect((res as Failure).error, isA<ParseError>());
+    });
+
     test('сетевая ошибка Dio → Failure', () async {
-      when(() => client.getPlain(any())).thenThrow(
+      when(() => client.deleteJson<dynamic>(any())).thenThrow(
         DioException(
           requestOptions: RequestOptions(path: ''),
           type: DioExceptionType.connectionError,

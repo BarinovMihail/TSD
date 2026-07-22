@@ -137,15 +137,24 @@ class InventoryRepository {
   ) => _addBarcode(nomenclature, characteristic, barcode: barcode.trim());
 
   /// Удаление штрихкода в 1С по его номеру.
-  /// GET /hs/inventory/delete/{Штрихкод} (номер URL-encoded).
+  /// DELETE /hs/inventory/delete/{Штрихкод} (номер URL-encoded).
+  /// Успешный ответ:
+  /// {"Штрихкод":"...", "Результат":"Успешно удалено"}.
   Future<Result<void>> deleteBarcode(String barcode) async {
     final normalized = barcode.trim();
     final path = 'hs/inventory/delete/${Uri.encodeComponent(normalized)}';
     try {
-      // Сервис удаления может вернуть текст или пустое тело, поэтому здесь
-      // намеренно не используем getJson: успешное удаление не должно стать
-      // NetworkError из-за попытки разобрать ответ 1С как JSON.
-      await _client.getPlain(path);
+      final response = await _client.deleteJson<dynamic>(path);
+      final data = response.data is String
+          ? jsonDecode(response.data as String)
+          : response.data;
+      if (data is! Map ||
+          data['Штрихкод']?.toString().trim() != normalized ||
+          data['Результат']?.toString().trim() != 'Успешно удалено') {
+        return const Failure(
+          ParseError('Некорректный ответ сервиса удаления штрихкода'),
+        );
+      }
       return const Success(null);
     } on DioException catch (e) {
       return Failure(ApiError.fromDio(e));
