@@ -58,6 +58,20 @@ class DioClient {
   Future<Response<T>> getJson<T>(String path, {Map<String, dynamic>? query}) =>
       _request<T>((url) => _dio.get<T>(url, queryParameters: query), path);
 
+  /// GET без JSON-декодирования ответа. Нужен для командных HTTP-сервисов 1С,
+  /// которые при успехе возвращают обычный текст или пустое тело.
+  Future<Response<String>> getPlain(
+    String path, {
+    Map<String, dynamic>? query,
+  }) => _request<String>(
+    (url) => _dio.get<String>(
+      url,
+      queryParameters: query,
+      options: Options(responseType: ResponseType.plain),
+    ),
+    path,
+  );
+
   /// POST с опциональным per-request receiveTimeout. Для тяжёлых операций 1С
   /// (например, генерация/запись нового штрихкода) передают большее значение,
   /// чтобы не получить ложный NetworkError по дефолтному таймауту.

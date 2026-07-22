@@ -360,7 +360,14 @@ void main() {
       expect(find.text('Удалить штрихкод 111?'), findsOneWidget);
       verifyNever(() => repo.deleteBarcode(any()));
 
-      await tester.tap(find.widgetWithText(FilledButton, 'Удалить'));
+      final deleteButton = find.widgetWithText(FilledButton, 'Удалить');
+      final cancelButton = find.widgetWithText(OutlinedButton, 'Отмена');
+      expect(
+        tester.getSize(deleteButton).width,
+        tester.getSize(cancelButton).width,
+      );
+
+      await tester.tap(deleteButton);
       await tester.pumpAndSettle();
 
       verify(() => repo.deleteBarcode('111')).called(1);
@@ -384,7 +391,7 @@ void main() {
 
       await tester.tap(find.byTooltip('Удалить штрихкод 111'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextButton, 'Отмена'));
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Отмена'));
       await tester.pumpAndSettle();
 
       verifyNever(() => repo.deleteBarcode(any()));

@@ -142,7 +142,10 @@ class InventoryRepository {
     final normalized = barcode.trim();
     final path = 'hs/inventory/delete/${Uri.encodeComponent(normalized)}';
     try {
-      await _client.getJson<dynamic>(path);
+      // Сервис удаления может вернуть текст или пустое тело, поэтому здесь
+      // намеренно не используем getJson: успешное удаление не должно стать
+      // NetworkError из-за попытки разобрать ответ 1С как JSON.
+      await _client.getPlain(path);
       return const Success(null);
     } on DioException catch (e) {
       return Failure(ApiError.fromDio(e));

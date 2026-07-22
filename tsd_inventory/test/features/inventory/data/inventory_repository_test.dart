@@ -366,22 +366,22 @@ void main() {
   group('deleteBarcode — GET /delete/{ШК}', () {
     test('номер штрихкода trim-ится и URL-кодируется', () async {
       when(
-        () => client.getJson<dynamic>(any()),
-      ).thenAnswer((_) async => _okResponse<dynamic>());
+        () => client.getPlain(any()),
+      ).thenAnswer((_) async => _okResponse<String>());
       final repo = InventoryRepository(client: client, db: db);
 
       final res = await repo.deleteBarcode(' ШК 12/34 ');
 
       expect(res, isA<Success>());
       verify(
-        () => client.getJson<dynamic>(
+        () => client.getPlain(
           'hs/inventory/delete/%D0%A8%D0%9A%2012%2F34',
         ),
       ).called(1);
     });
 
     test('сетевая ошибка Dio → Failure', () async {
-      when(() => client.getJson<dynamic>(any())).thenThrow(
+      when(() => client.getPlain(any())).thenThrow(
         DioException(
           requestOptions: RequestOptions(path: ''),
           type: DioExceptionType.connectionError,

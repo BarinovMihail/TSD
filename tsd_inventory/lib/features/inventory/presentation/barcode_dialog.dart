@@ -440,18 +440,35 @@ class _ViewBarcodesDialogState extends ConsumerState<ViewBarcodesDialog> {
       builder: (dialogContext) => AlertDialog(
         title: const Text(AppStrings.deleteBarcodeTitle),
         content: Text(AppStrings.deleteBarcodeConfirm(barcode)),
+        actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text(AppStrings.cancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(dialogContext).colorScheme.error,
-              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
+          SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(56),
+                    backgroundColor: Theme.of(dialogContext).colorScheme.error,
+                    foregroundColor: Theme.of(
+                      dialogContext,
+                    ).colorScheme.onError,
+                  ),
+                  child: const Text(AppStrings.deleteBarcode),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(56),
+                  ),
+                  child: const Text(AppStrings.cancel),
+                ),
+              ],
             ),
-            child: const Text(AppStrings.deleteBarcode),
           ),
         ],
       ),
