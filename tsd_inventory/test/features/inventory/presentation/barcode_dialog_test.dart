@@ -331,6 +331,64 @@ void main() {
       expect(find.text('111'), findsOneWidget);
       expect(find.text('222'), findsOneWidget);
       expect(find.text('333'), findsOneWidget);
+      expect(find.byIcon(Icons.delete_outline), findsNWidgets(3));
+    });
+
+    testWidgets('удаление требует подтверждения и обновляет список', (
+      tester,
+    ) async {
+      when(
+        () => repo.deleteBarcode(any()),
+      ).thenAnswer((_) async => const Success(null));
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([_row(barcodes: const ['222'])]),
+      );
+      final ctrl = _controller(
+        repo,
+        db,
+        feedback,
+        _row(barcodes: const ['111', '222']),
+      );
+
+      await tester.pumpWidget(
+        wrap(ViewBarcodesDialog(lineNumber: 1, ctrl: ctrl), ctrl),
+      );
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Удалить штрихкод 111'));
+      await tester.pumpAndSettle();
+      expect(find.text('Удалить штрихкод 111?'), findsOneWidget);
+      verifyNever(() => repo.deleteBarcode(any()));
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Удалить'));
+      await tester.pumpAndSettle();
+
+      verify(() => repo.deleteBarcode('111')).called(1);
+      expect(find.text('111'), findsNothing);
+      expect(find.text('222'), findsOneWidget);
+      expect(find.text('Штрихкод успешно удалён'), findsOneWidget);
+    });
+
+    testWidgets('отмена не удаляет штрихкод', (tester) async {
+      final ctrl = _controller(
+        repo,
+        db,
+        feedback,
+        _row(barcodes: const ['111']),
+      );
+
+      await tester.pumpWidget(
+        wrap(ViewBarcodesDialog(lineNumber: 1, ctrl: ctrl), ctrl),
+      );
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Удалить штрихкод 111'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, 'Отмена'));
+      await tester.pumpAndSettle();
+
+      verifyNever(() => repo.deleteBarcode(any()));
+      expect(find.text('111'), findsOneWidget);
     });
 
     testWidgets('добавление нового штрихкода → POST + перезагрузка', (

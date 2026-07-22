@@ -319,8 +319,9 @@ class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
 
 /// Окно просмотра штрихкодов позиции (barcode_available): номенклатура,
 /// характеристика, полный список всех штрихкодов, кнопка «Добавить новый
-/// штрихкод» и «Закрыть». Существующие штрихкоды не удаляются и не меняются.
-/// После успешного добавления список обновляется из перезагруженного документа.
+/// штрихкод» и «Закрыть». Каждый штрихкод можно удалить через кнопку-корзину
+/// или долгое нажатие с обязательным подтверждением.
+/// После изменения список обновляется из перезагруженного документа.
 class ViewBarcodesDialog extends ConsumerStatefulWidget {
   const ViewBarcodesDialog({
     super.key,
@@ -338,6 +339,9 @@ class ViewBarcodesDialog extends ConsumerStatefulWidget {
 
 class _ViewBarcodesDialogState extends ConsumerState<ViewBarcodesDialog> {
   bool _sending = false;
+  String? _deletingBarcode;
+
+  bool get _busy => _sending || _deletingBarcode != null;
 
   DocTableRow? get _row {
     final rows = widget.ctrl.scan?.rows ?? const <DocTableRow>[];
@@ -348,7 +352,7 @@ class _ViewBarcodesDialogState extends ConsumerState<ViewBarcodesDialog> {
   }
 
   Future<void> _addNew() async {
-    if (_sending) return;
+    if (_busy) return;
     final row = _row;
     if (row == null) return;
     final prevBarcodes = <String>{...row.barcodes};
@@ -386,7 +390,7 @@ class _ViewBarcodesDialogState extends ConsumerState<ViewBarcodesDialog> {
   }
 
   Future<void> _addScanned() async {
-    if (_sending) return;
+    if (_busy) return;
     final row = _row;
     if (row == null) return;
     final barcode = await widget.onCaptureBarcode?.call(row);
@@ -423,6 +427,77 @@ class _ViewBarcodesDialogState extends ConsumerState<ViewBarcodesDialog> {
             action: SnackBarAction(
               label: AppStrings.retry,
               onPressed: _addScanned,
+            ),
+          ),
+        );
+    }
+  }
+
+  Future<void> _confirmDelete(String barcode) async {
+    if (_busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text(AppStrings.deleteBarcodeTitle),
+        content: Text(AppStrings.deleteBarcodeConfirm(barcode)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text(AppStrings.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
+            ),
+            child: const Text(AppStrings.deleteBarcode),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    await _delete(barcode);
+  }
+
+  Future<void> _delete(String barcode) async {
+    if (_busy) return;
+    setState(() => _deletingBarcode = barcode);
+    final result = await widget.ctrl.deleteBarcodeAndReload(
+      lineNumber: widget.lineNumber,
+      barcode: barcode,
+    );
+    if (!mounted) return;
+    setState(() => _deletingBarcode = null);
+
+    switch (result.outcome) {
+      case DeleteBarcodeOutcome.done:
+      case DeleteBarcodeOutcome.verifiedAfterTimeout:
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text(AppStrings.barcodeDeletedSuccess),
+            backgroundColor: Theme.of(context).colorScheme.secondary,
+          ),
+        );
+      case DeleteBarcodeOutcome.failed:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.error?.userMessage ?? AppStrings.errGeneric),
+            action: SnackBarAction(
+              label: AppStrings.retry,
+              onPressed: () => _delete(barcode),
+            ),
+          ),
+        );
+      case DeleteBarcodeOutcome.inconclusive:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(AppStrings.deleteBarcodeInconclusive),
+            action: SnackBarAction(
+              label: AppStrings.retry,
+              onPressed: () => _delete(barcode),
             ),
           ),
         );
@@ -469,14 +544,49 @@ class _ViewBarcodesDialogState extends ConsumerState<ViewBarcodesDialog> {
                 )
               else
                 for (final b in barcodes)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Text(
-                      b,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w600,
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onLongPress: _busy ? null : () => _confirmDelete(b),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                b,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontFamily: 'monospace',
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            if (_deletingBarcode == b)
+                              const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              )
+                            else
+                              IconButton(
+                                tooltip: AppStrings.deleteBarcodeTooltip(b),
+                                onPressed: _busy
+                                    ? null
+                                    : () => _confirmDelete(b),
+                                icon: Icon(
+                                  Icons.delete_outline,
+                                  color: scheme.error,
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -501,7 +611,7 @@ class _ViewBarcodesDialogState extends ConsumerState<ViewBarcodesDialog> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
-                onPressed: _sending ? null : _addScanned,
+                onPressed: _busy ? null : _addScanned,
                 icon: const Icon(Icons.qr_code_scanner),
                 label: const Text(AppStrings.scanBarcodeFromItem),
               ),
@@ -518,7 +628,7 @@ class _ViewBarcodesDialogState extends ConsumerState<ViewBarcodesDialog> {
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
-              onPressed: _sending ? null : _addNew,
+              onPressed: _busy ? null : _addNew,
               child: _sending
                   ? const SizedBox(
                       width: 22,
@@ -532,7 +642,7 @@ class _ViewBarcodesDialogState extends ConsumerState<ViewBarcodesDialog> {
               style: OutlinedButton.styleFrom(
                 minimumSize: const Size.fromHeight(56),
               ),
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: _busy ? null : () => Navigator.of(context).pop(),
               child: const Text(AppStrings.close),
             ),
           ],

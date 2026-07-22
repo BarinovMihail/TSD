@@ -326,4 +326,99 @@ void main() {
       expect(r.outcome, AddBarcodeOutcome.inconclusive);
     });
   });
+
+  group('deleteBarcodeAndReload', () {
+    test('передаёт ШК и обновляет документ', () async {
+      when(
+        () => repo.deleteBarcode(any()),
+      ).thenAnswer((_) async => const Success(null));
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([_row(barcodes: const ['222'])]),
+      );
+      final ctrl = _controller(
+        repo,
+        db,
+        feedback,
+        _row(barcodes: const ['111', '222']),
+      );
+
+      final r = await ctrl.deleteBarcodeAndReload(
+        lineNumber: 1,
+        barcode: ' 111 ',
+      );
+
+      expect(r.outcome, DeleteBarcodeOutcome.done);
+      verify(() => repo.deleteBarcode('111')).called(1);
+      verify(() => repo.getTable('АЕ-1')).called(1);
+      expect(ctrl.scan!.rows.single.barcodes, const ['222']);
+    });
+
+    test('успешное удаление отражается локально при ошибке обновления', () async {
+      when(
+        () => repo.deleteBarcode(any()),
+      ).thenAnswer((_) async => const Success(null));
+      when(
+        () => repo.getTable(any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      final ctrl = _controller(
+        repo,
+        db,
+        feedback,
+        _row(barcodes: const ['111', '222']),
+      );
+
+      final r = await ctrl.deleteBarcodeAndReload(
+        lineNumber: 1,
+        barcode: '111',
+      );
+
+      expect(r.outcome, DeleteBarcodeOutcome.done);
+      expect(ctrl.scan!.rows.single.barcodes, const ['222']);
+    });
+
+    test('после сетевой ошибки исчезновение ШК подтверждает удаление', () async {
+      when(
+        () => repo.deleteBarcode(any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([_row(barcodes: const ['222'])]),
+      );
+      final ctrl = _controller(
+        repo,
+        db,
+        feedback,
+        _row(barcodes: const ['111', '222']),
+      );
+
+      final r = await ctrl.deleteBarcodeAndReload(
+        lineNumber: 1,
+        barcode: '111',
+      );
+
+      expect(r.outcome, DeleteBarcodeOutcome.verifiedAfterTimeout);
+      expect(ctrl.scan!.rows.single.barcodes, const ['222']);
+    });
+
+    test('после сетевой ошибки оставшийся ШК не подтверждает удаление', () async {
+      when(
+        () => repo.deleteBarcode(any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([_row(barcodes: const ['111', '222'])]),
+      );
+      final ctrl = _controller(
+        repo,
+        db,
+        feedback,
+        _row(barcodes: const ['111', '222']),
+      );
+
+      final r = await ctrl.deleteBarcodeAndReload(
+        lineNumber: 1,
+        barcode: '111',
+      );
+
+      expect(r.outcome, DeleteBarcodeOutcome.inconclusive);
+    });
+  });
 }

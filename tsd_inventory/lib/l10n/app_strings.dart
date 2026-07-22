@@ -97,6 +97,7 @@ abstract final class AppStrings {
   static const viewBarcodesTitle = 'Штрихкоды позиции';
   static const addBarcode = 'Добавить штрихкод';
   static const barcodeAddedSuccess = 'Штрихкод успешно добавлен';
+  static const barcodeDeletedSuccess = 'Штрихкод успешно удалён';
   static const addNewBarcode = 'Добавить новый штрихкод';
   static const scanBarcodeFromItem = 'Сканировать ШК номенклатуры';
   static const scanBarcodeTitle = 'Сканирование штрихкода';
@@ -111,6 +112,14 @@ abstract final class AppStrings {
   static const noBarcodesYet = 'У позиции пока нет штрихкодов';
   static const checkingBarcodeAfterTimeout =
       'Нет ответа 1С. Проверяю, записан ли штрихкод…';
+  static const deleteBarcodeTitle = 'Удаление штрихкода';
+  static String deleteBarcodeConfirm(String barcode) =>
+      'Удалить штрихкод $barcode?';
+  static const deleteBarcode = 'Удалить';
+  static String deleteBarcodeTooltip(String barcode) =>
+      'Удалить штрихкод $barcode';
+  static const deleteBarcodeInconclusive =
+      'Не удалось подтвердить удаление штрихкода';
 
   // Снятие факта сканирования (долгое нажатие на отсканированной позиции)
   static const unscanTitle = 'Управление фактом';

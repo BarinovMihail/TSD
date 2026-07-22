@@ -48,6 +48,21 @@ enum AddBarcodeOutcome {
   inconclusive,
 }
 
+/// Результат удаления штрихкода и последующего обновления документа.
+enum DeleteBarcodeOutcome {
+  /// Сервис подтвердил удаление, документ перечитан.
+  done,
+
+  /// Сервис вернул HTTP-ошибку — удаление не выполнено.
+  failed,
+
+  /// Ответ сервиса потерян, но после обновления штрихкод исчез.
+  verifiedAfterTimeout,
+
+  /// Ответ сервиса потерян, а подтвердить удаление обновлением не удалось.
+  inconclusive,
+}
+
 class InventoryScreenController extends ChangeNotifier {
   InventoryScreenController({
     required this.docCode,
@@ -167,6 +182,55 @@ class InventoryScreenController extends ChangeNotifier {
     );
   }
 
+  /// Удалить штрихкод в 1С и перечитать документ.
+  ///
+  /// Если ответ сервиса потерян, перечитываем документ и считаем операцию
+  /// успешной только тогда, когда конкретный штрихкод исчез из строки.
+  Future<({DeleteBarcodeOutcome outcome, ApiError? error})>
+  deleteBarcodeAndReload({
+    required int lineNumber,
+    required String barcode,
+  }) async {
+    final normalized = barcode.trim();
+    final res = await repo.deleteBarcode(normalized);
+
+    if (res is Success) {
+      // Сервис подтвердил удаление. Перечитываем документ, а при недоступности
+      // списка всё равно сразу отражаем подтверждённое изменение локально.
+      await reload();
+      _removeBarcodeLocally(lineNumber: lineNumber, barcode: normalized);
+      return (outcome: DeleteBarcodeOutcome.done, error: null);
+    }
+
+    final err = (res as Failure<void>).error;
+    if (err is! NetworkError) {
+      return (outcome: DeleteBarcodeOutcome.failed, error: err);
+    }
+
+    final reloadRes = await repo.getTable(docCode);
+    if (reloadRes is Success<List<DocTableRow>>) {
+      final scan = this.scan;
+      if (scan != null) {
+        scan.replaceRows(reloadRes.value);
+        await scan.hydrateFromDb();
+      }
+      notifyListeners();
+    }
+    final removed =
+        reloadRes is Success<List<DocTableRow>> &&
+        !_rowHasBarcode(
+          reloadRes.value,
+          lineNumber: lineNumber,
+          barcode: normalized,
+        );
+    return (
+      outcome: removed
+          ? DeleteBarcodeOutcome.verifiedAfterTimeout
+          : DeleteBarcodeOutcome.inconclusive,
+      error: null,
+    );
+  }
+
   Future<({AddBarcodeOutcome outcome, ApiError? error})> _finishBarcodeAdd(
     Result<void> res, {
     required bool Function(List<DocTableRow> rows) verifyAfterNetworkError,
@@ -222,6 +286,27 @@ class InventoryScreenController extends ChangeNotifier {
       return row.barcodes.any((value) => value.trim() == barcode);
     }
     return false;
+  }
+
+  void _removeBarcodeLocally({
+    required int lineNumber,
+    required String barcode,
+  }) {
+    final scan = this.scan;
+    if (scan == null) return;
+    scan.replaceRows([
+      for (final row in scan.rows)
+        if (row.lineNumber == lineNumber)
+          row.copyWith(
+            barcodes: [
+              for (final value in row.barcodes)
+                if (value.trim() != barcode) value,
+            ],
+          )
+        else
+          row,
+    ]);
+    notifyListeners();
   }
 
   void _onScanChanged() => notifyListeners();

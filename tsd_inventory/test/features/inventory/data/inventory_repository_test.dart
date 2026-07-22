@@ -362,4 +362,37 @@ void main() {
       expect((res as Failure).error, isA<NetworkError>());
     });
   });
+
+  group('deleteBarcode — GET /delete/{ШК}', () {
+    test('номер штрихкода trim-ится и URL-кодируется', () async {
+      when(
+        () => client.getJson<dynamic>(any()),
+      ).thenAnswer((_) async => _okResponse<dynamic>());
+      final repo = InventoryRepository(client: client, db: db);
+
+      final res = await repo.deleteBarcode(' ШК 12/34 ');
+
+      expect(res, isA<Success>());
+      verify(
+        () => client.getJson<dynamic>(
+          'hs/inventory/delete/%D0%A8%D0%9A%2012%2F34',
+        ),
+      ).called(1);
+    });
+
+    test('сетевая ошибка Dio → Failure', () async {
+      when(() => client.getJson<dynamic>(any())).thenThrow(
+        DioException(
+          requestOptions: RequestOptions(path: ''),
+          type: DioExceptionType.connectionError,
+        ),
+      );
+      final repo = InventoryRepository(client: client, db: db);
+
+      final res = await repo.deleteBarcode('0012345678905');
+
+      expect(res, isA<Failure>());
+      expect((res as Failure).error, isA<NetworkError>());
+    });
+  });
 }

@@ -136,6 +136,22 @@ class InventoryRepository {
     String barcode,
   ) => _addBarcode(nomenclature, characteristic, barcode: barcode.trim());
 
+  /// Удаление штрихкода в 1С по его номеру.
+  /// GET /hs/inventory/delete/{Штрихкод} (номер URL-encoded).
+  Future<Result<void>> deleteBarcode(String barcode) async {
+    final normalized = barcode.trim();
+    final path = 'hs/inventory/delete/${Uri.encodeComponent(normalized)}';
+    try {
+      await _client.getJson<dynamic>(path);
+      return const Success(null);
+    } on DioException catch (e) {
+      return Failure(ApiError.fromDio(e));
+    } catch (e) {
+      _log.warning('Ошибка удаления штрихкода: $e');
+      return const Failure(NetworkError());
+    }
+  }
+
   Future<Result<void>> _addBarcode(
     String nomenclature,
     String characteristic, {
