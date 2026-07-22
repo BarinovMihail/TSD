@@ -7,6 +7,7 @@ import 'package:tsd_inventory/core/network/dio_client.dart';
 import 'package:tsd_inventory/core/result/result.dart';
 import 'package:tsd_inventory/core/storage/app_database.dart';
 
+import '../domain/barcode_assignment.dart';
 import '../domain/doc_table_parser.dart';
 import '../domain/doc_table_row.dart';
 
@@ -161,6 +162,54 @@ class InventoryRepository {
     } catch (e) {
       _log.warning('Ошибка удаления штрихкода: $e');
       return const Failure(NetworkError());
+    }
+  }
+
+  /// Текущая привязка штрихкода в 1С.
+  /// GET /hs/inventory/barcode/{Штрихкод}.
+  ///
+  /// Пустой объект или ответ с пустым наименованием означает, что штрихкод
+  /// ещё свободен.
+  /// Для совместимости принимаются поля «Номенклатура» и «Наименование».
+  Future<Result<BarcodeAssignment?>> getBarcodeAssignment(
+    String barcode,
+  ) async {
+    final normalized = barcode.trim();
+    final path = 'hs/inventory/barcode/${Uri.encodeComponent(normalized)}';
+    try {
+      final response = await _client.getJson<dynamic>(path);
+      final dynamic data = response.data is String
+          ? jsonDecode(response.data as String)
+          : response.data;
+      if (data is! Map) {
+        return const Failure(
+          ParseError('Некорректный ответ сервиса поиска штрихкода'),
+        );
+      }
+
+      final nomenclature =
+          (data['Номенклатура'] ??
+                  data['Наименование'] ??
+                  data['НоменклатураНаименование'])
+              ?.toString()
+              .trim() ??
+          '';
+      if (nomenclature.isEmpty) return const Success(null);
+      final characteristic =
+          data['Характеристика']?.toString().trim() ?? '';
+      return Success(
+        BarcodeAssignment(
+          nomenclature: nomenclature,
+          characteristic: characteristic,
+        ),
+      );
+    } on DioException catch (e) {
+      return Failure(ApiError.fromDio(e));
+    } catch (e) {
+      _log.warning('Ошибка поиска штрихкода: $e');
+      return const Failure(
+        ParseError('Не удалось разобрать текущую привязку штрихкода'),
+      );
     }
   }
 

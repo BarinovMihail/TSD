@@ -2,9 +2,75 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_error.dart';
+import '../../../core/result/result.dart';
 import '../../../l10n/app_strings.dart';
 import '../application/inventory_screen_controller.dart';
+import '../domain/barcode_assignment.dart';
 import '../domain/doc_table_row.dart';
+
+Future<bool> _confirmScannedBarcodeAssignment({
+  required BuildContext context,
+  required InventoryScreenController ctrl,
+  required DocTableRow target,
+  required String barcode,
+}) async {
+  final normalized = barcode.trim();
+  final lookup = await ctrl.repo.getBarcodeAssignment(normalized);
+  if (!context.mounted) return false;
+
+  if (lookup is Failure<BarcodeAssignment?>) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text(AppStrings.barcodeAssignmentCheckFailed)),
+    );
+    return false;
+  }
+
+  final current = (lookup as Success<BarcodeAssignment?>).value;
+  if (current == null) return true;
+  if (current.matches(
+    nomenclature: target.nomenclature,
+    characteristic: target.characteristic,
+  )) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text(AppStrings.barcodeAlreadyAssignedHere)),
+    );
+    return false;
+  }
+
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text(AppStrings.barcodeAlreadyAssignedTitle),
+      content: Text(
+        AppStrings.barcodeTransferConfirm(
+          barcode: normalized,
+          currentNomenclature: current.nomenclature,
+          currentCharacteristic: current.characteristic,
+          newNomenclature: target.nomenclature,
+          newCharacteristic: target.characteristic,
+        ),
+      ),
+      actions: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text(AppStrings.transferBarcode),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text(AppStrings.cancel),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+  return confirmed == true;
+}
 
 void _showBarcodeAdded(BuildContext context) {
   final messenger = ScaffoldMessenger.of(context);
@@ -130,6 +196,17 @@ class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
     if (!mounted || barcode == null || barcode.trim().isEmpty) return;
 
     setState(() => _sending = true);
+    final shouldAdd = await _confirmScannedBarcodeAssignment(
+      context: context,
+      ctrl: widget.ctrl,
+      target: widget.row,
+      barcode: barcode,
+    );
+    if (!mounted) return;
+    if (!shouldAdd) {
+      setState(() => _sending = false);
+      return;
+    }
     final result = await widget.ctrl.addScannedBarcodeAndReload(
       lineNumber: widget.row.lineNumber,
       nomenclature: widget.row.nomenclature,
@@ -397,6 +474,17 @@ class _ViewBarcodesDialogState extends ConsumerState<ViewBarcodesDialog> {
     if (!mounted || barcode == null || barcode.trim().isEmpty) return;
 
     setState(() => _sending = true);
+    final shouldAdd = await _confirmScannedBarcodeAssignment(
+      context: context,
+      ctrl: widget.ctrl,
+      target: row,
+      barcode: barcode,
+    );
+    if (!mounted) return;
+    if (!shouldAdd) {
+      setState(() => _sending = false);
+      return;
+    }
     final result = await widget.ctrl.addScannedBarcodeAndReload(
       lineNumber: row.lineNumber,
       nomenclature: row.nomenclature,

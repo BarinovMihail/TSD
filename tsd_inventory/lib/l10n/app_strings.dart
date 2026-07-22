@@ -112,6 +112,29 @@ abstract final class AppStrings {
   static const noBarcodesYet = 'У позиции пока нет штрихкодов';
   static const checkingBarcodeAfterTimeout =
       'Нет ответа 1С. Проверяю, записан ли штрихкод…';
+  static const barcodeAlreadyAssignedTitle = 'Штрихкод уже используется';
+  static const barcodeAlreadyAssignedHere =
+      'Штрихкод уже привязан к этой позиции';
+  static const barcodeAssignmentCheckFailed =
+      'Не удалось проверить, используется ли штрихкод';
+  static const transferBarcode = 'Перенести';
+  static String barcodeTransferConfirm({
+    required String barcode,
+    required String currentNomenclature,
+    required String currentCharacteristic,
+    required String newNomenclature,
+    required String newCharacteristic,
+  }) {
+    String position(String nomenclature, String characteristic) =>
+        '$nomenclature\nХарактеристика: '
+        '${characteristic.isEmpty ? withoutCharacteristic : characteristic}';
+
+    return 'Штрихкод $barcode уже привязан к позиции:\n'
+        '${position(currentNomenclature, currentCharacteristic)}\n\n'
+        'При продолжении он будет удалён у этой позиции и привязан к:\n'
+        '${position(newNomenclature, newCharacteristic)}\n\n'
+        'Перенести штрихкод?';
+  }
   static const deleteBarcodeTitle = 'Удаление штрихкода';
   static String deleteBarcodeConfirm(String barcode) =>
       'Удалить штрихкод $barcode?';

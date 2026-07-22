@@ -8,6 +8,7 @@ import 'package:tsd_inventory/core/network/dio_client.dart';
 import 'package:tsd_inventory/core/result/result.dart';
 import 'package:tsd_inventory/core/storage/app_database.dart';
 import 'package:tsd_inventory/features/inventory/data/inventory_repository.dart';
+import 'package:tsd_inventory/features/inventory/domain/barcode_assignment.dart';
 
 class _MockClient extends Mock implements DioClient {}
 
@@ -360,6 +361,86 @@ void main() {
 
       expect(res, isA<Failure>());
       expect((res as Failure).error, isA<NetworkError>());
+    });
+  });
+
+  group('getBarcodeAssignment — GET /barcode/{ШК}', () {
+    test('URL-кодирует ШК и разбирает номенклатуру с характеристикой', () async {
+      when(() => client.getJson<dynamic>(any())).thenAnswer(
+        (_) async => _jsonResponse<dynamic>({
+          'Номенклатура': ' Монитор ',
+          'Характеристика': ' Black ',
+        }),
+      );
+      final repo = InventoryRepository(client: client, db: db);
+
+      final result = await repo.getBarcodeAssignment(' ШК 12/34 ');
+
+      expect(result, isA<Success<BarcodeAssignment?>>());
+      final assignment = (result as Success<BarcodeAssignment?>).value;
+      expect(assignment?.nomenclature, 'Монитор');
+      expect(assignment?.characteristic, 'Black');
+      verify(
+        () => client.getJson<dynamic>(
+          'hs/inventory/barcode/%D0%A8%D0%9A%2012%2F34',
+        ),
+      ).called(1);
+    });
+
+    test('принимает поле «Наименование» и строковый JSON', () async {
+      when(() => client.getJson<dynamic>(any())).thenAnswer(
+        (_) async => _jsonResponse<dynamic>(
+          jsonEncode({'Наименование': 'Клавиатура', 'Характеристика': ''}),
+        ),
+      );
+      final repo = InventoryRepository(client: client, db: db);
+
+      final result = await repo.getBarcodeAssignment('123');
+
+      final assignment = (result as Success<BarcodeAssignment?>).value;
+      expect(assignment?.nomenclature, 'Клавиатура');
+      expect(assignment?.characteristic, '');
+    });
+
+    test('пустой объект означает, что ШК свободен', () async {
+      when(
+        () => client.getJson<dynamic>(any()),
+      ).thenAnswer((_) async => _jsonResponse<dynamic>(<String, dynamic>{}));
+      final repo = InventoryRepository(client: client, db: db);
+
+      final result = await repo.getBarcodeAssignment('123');
+
+      expect((result as Success<BarcodeAssignment?>).value, isNull);
+    });
+
+    test('404 не считается свободным ШК и блокирует добавление', () async {
+      when(() => client.getJson<dynamic>(any())).thenThrow(
+        DioException(
+          requestOptions: RequestOptions(path: ''),
+          response: Response<void>(
+            requestOptions: RequestOptions(path: ''),
+            statusCode: 404,
+          ),
+        ),
+      );
+      final repo = InventoryRepository(client: client, db: db);
+
+      final result = await repo.getBarcodeAssignment('123');
+
+      expect(result, isA<Failure<BarcodeAssignment?>>());
+      expect((result as Failure).error, isA<NotFoundError>());
+    });
+
+    test('некорректный ответ блокирует добавление', () async {
+      when(
+        () => client.getJson<dynamic>(any()),
+      ).thenAnswer((_) async => _jsonResponse<dynamic>('not-json'));
+      final repo = InventoryRepository(client: client, db: db);
+
+      final result = await repo.getBarcodeAssignment('123');
+
+      expect(result, isA<Failure<BarcodeAssignment?>>());
+      expect((result as Failure).error, isA<ParseError>());
     });
   });
 

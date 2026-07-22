@@ -9,6 +9,7 @@ import 'package:tsd_inventory/core/storage/app_database.dart';
 import 'package:tsd_inventory/features/inventory/application/inventory_screen_controller.dart';
 import 'package:tsd_inventory/features/inventory/application/scan_controller.dart';
 import 'package:tsd_inventory/features/inventory/data/inventory_repository.dart';
+import 'package:tsd_inventory/features/inventory/domain/barcode_assignment.dart';
 import 'package:tsd_inventory/features/inventory/domain/barcode_matcher.dart';
 import 'package:tsd_inventory/features/inventory/domain/doc_table_row.dart';
 import 'package:tsd_inventory/features/inventory/presentation/barcode_dialog.dart';
@@ -78,6 +79,9 @@ void main() {
     registerFallbackValue('');
     when(() => feedback.success()).thenAnswer((_) async {});
     when(() => feedback.error()).thenAnswer((_) async {});
+    when(
+      () => repo.getBarcodeAssignment(any()),
+    ).thenAnswer((_) async => const Success(null));
     when(
       () => db.getScanProgress(any()),
     ).thenAnswer((_) async => <int, ScanProgressData>{});
@@ -472,7 +476,161 @@ void main() {
           '0012345678905',
         ),
       ).called(1);
+      verify(
+        () => repo.getBarcodeAssignment('0012345678905'),
+      ).called(1);
       expect(find.text('0012345678905'), findsOneWidget);
+    });
+
+    testWidgets('занятый ШК требует подтверждения переноса', (tester) async {
+      when(() => repo.getBarcodeAssignment(any())).thenAnswer(
+        (_) async => const Success(
+          BarcodeAssignment(
+            nomenclature: 'Старая позиция',
+            characteristic: 'Синяя',
+          ),
+        ),
+      );
+      when(
+        () => repo.addScannedBarcode(any(), any(), any()),
+      ).thenAnswer((_) async => const Success(null));
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([
+          _row(characteristic: 'Black', barcodes: const ['111', '999']),
+        ]),
+      );
+      final ctrl = _controller(
+        repo,
+        db,
+        feedback,
+        _row(characteristic: 'Black', barcodes: const ['111']),
+      );
+
+      await tester.pumpWidget(
+        wrap(
+          ViewBarcodesDialog(
+            lineNumber: 1,
+            ctrl: ctrl,
+            onCaptureBarcode: (_) async => '999',
+          ),
+          ctrl,
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text(AppStrings.scanBarcodeFromItem));
+      await tester.pumpAndSettle();
+
+      expect(find.text(AppStrings.barcodeAlreadyAssignedTitle), findsOneWidget);
+      expect(find.textContaining('Старая позиция'), findsOneWidget);
+      expect(find.textContaining('Характеристика: Синяя'), findsOneWidget);
+      verifyNever(() => repo.addScannedBarcode(any(), any(), any()));
+
+      await tester.tap(
+        find.widgetWithText(FilledButton, AppStrings.transferBarcode),
+      );
+      await tester.pumpAndSettle();
+
+      verify(() => repo.addScannedBarcode('Монитор', 'Black', '999')).called(1);
+    });
+
+    testWidgets('отмена переноса не отправляет POST', (tester) async {
+      when(() => repo.getBarcodeAssignment(any())).thenAnswer(
+        (_) async => const Success(
+          BarcodeAssignment(
+            nomenclature: 'Старая позиция',
+            characteristic: '',
+          ),
+        ),
+      );
+      final ctrl = _controller(
+        repo,
+        db,
+        feedback,
+        _row(characteristic: 'Black', barcodes: const ['111']),
+      );
+
+      await tester.pumpWidget(
+        wrap(
+          ViewBarcodesDialog(
+            lineNumber: 1,
+            ctrl: ctrl,
+            onCaptureBarcode: (_) async => '999',
+          ),
+          ctrl,
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text(AppStrings.scanBarcodeFromItem));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(OutlinedButton, AppStrings.cancel));
+      await tester.pumpAndSettle();
+
+      verifyNever(() => repo.addScannedBarcode(any(), any(), any()));
+    });
+
+    testWidgets('ШК этой же позиции повторно не отправляется', (tester) async {
+      when(() => repo.getBarcodeAssignment(any())).thenAnswer(
+        (_) async => const Success(
+          BarcodeAssignment(nomenclature: 'Монитор', characteristic: 'Black'),
+        ),
+      );
+      final ctrl = _controller(
+        repo,
+        db,
+        feedback,
+        _row(characteristic: 'Black', barcodes: const ['111']),
+      );
+
+      await tester.pumpWidget(
+        wrap(
+          ViewBarcodesDialog(
+            lineNumber: 1,
+            ctrl: ctrl,
+            onCaptureBarcode: (_) async => '111',
+          ),
+          ctrl,
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text(AppStrings.scanBarcodeFromItem));
+      await tester.pumpAndSettle();
+
+      expect(find.text(AppStrings.barcodeAlreadyAssignedHere), findsOneWidget);
+      verifyNever(() => repo.addScannedBarcode(any(), any(), any()));
+    });
+
+    testWidgets('ошибка проверки ШК не допускает скрытую перезапись', (
+      tester,
+    ) async {
+      when(
+        () => repo.getBarcodeAssignment(any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      final ctrl = _controller(
+        repo,
+        db,
+        feedback,
+        _row(characteristic: 'Black', barcodes: const ['111']),
+      );
+
+      await tester.pumpWidget(
+        wrap(
+          ViewBarcodesDialog(
+            lineNumber: 1,
+            ctrl: ctrl,
+            onCaptureBarcode: (_) async => '999',
+          ),
+          ctrl,
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text(AppStrings.scanBarcodeFromItem));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(AppStrings.barcodeAssignmentCheckFailed),
+        findsOneWidget,
+      );
+      verifyNever(() => repo.addScannedBarcode(any(), any(), any()));
     });
   });
 }
