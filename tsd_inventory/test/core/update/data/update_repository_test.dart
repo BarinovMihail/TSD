@@ -254,6 +254,34 @@ void main() {
       await tmpDir.delete(recursive: true);
     });
 
+    test('успех: голый .apk (без zip), SHA-256 совпал → Success(apk)', () async {
+      final adapter = _DiskMockAdapter();
+      final apkBytes =
+          Uint8List.fromList(List.generate(512, (i) => i % 256));
+      final expectedHash = sha256.convert(apkBytes).toString();
+      adapter.downloadBytes = apkBytes; // не запаковываем
+      final repo = _repo(adapter);
+      final manifest = VersionManifest(
+        versionCode: 5,
+        versionName: '0.5.0',
+        apkPath: 'releases/tsd-inventory-0.5.0-5.apk',
+        releaseNotes: '',
+        sha256: expectedHash,
+        required: false,
+      );
+      final tmpDir = await Directory.systemTemp.createTemp('tsd_test_');
+
+      final res = await repo.downloadApk(manifest, targetDir: tmpDir);
+
+      expect(res, isA<Success>());
+      final file = (res as Success).value as File;
+      expect(await file.exists(), isTrue);
+      expect(await file.length(), apkBytes.length);
+      // zip-файл не должен создаваться для голого apk.
+      expect(await File('${tmpDir.path}/tsd_update.zip').exists(), isFalse);
+      await tmpDir.delete(recursive: true);
+    });
+
     test('скачивание без авторизации', () async {
       final adapter = _DiskMockAdapter(recordRequests: true);
       final apkBytes = Uint8List.fromList([1, 2, 3, 4]);

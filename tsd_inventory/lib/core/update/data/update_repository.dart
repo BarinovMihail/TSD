@@ -81,19 +81,23 @@ class UpdateRepository {
     }
   }
 
-  /// Скачать zip с APK, распаковать и проверить целостность.
+  /// Скачать APK (zip или голый .apk), проверить целостность.
   ///
-  /// [manifest.apkPath] — путь к zip-архиву внутри публичной папки Диска.
-  /// [manifest.sha256] — ожидаемый хеш **извлечённого** APK; пустая строка →
-  /// манифест невалиден, установка невозможна (возвращаем [ParseError], файл не
-  /// качаем). [targetDir] — куда положить APK (по умолчанию временная
-  /// директория системы; параметр нужен для тестов). [onProgress] — прогресс-бар.
+  /// [manifest.apkPath] — путь к файлу внутри публичной папки Диска. Поддерживается
+  /// два формата (определяется по расширению):
+  /// - `.zip` — архив с APK, распаковывается (исторический формат);
+  /// - `.apk` — готовый APK, берётся как есть.
+  ///
+  /// [manifest.sha256] — ожидаемый хеш APK; пустая строка → манифест невалиден,
+  /// установка невозможна (возвращаем [ParseError], файл не качаем). [targetDir] —
+  /// куда положить APK (по умолчанию временная директория системы; параметр нужен
+  /// для тестов). [onProgress] — прогресс-бар.
   ///
   /// Двухшаговое скачивание (как в [checkForUpdate]): сначала свежий href для
-  /// [VersionManifest.apkPath], затем сам zip. После распаковки берём единственный
-  /// файл `.apk` из архива, считаем SHA-256 и сравниваем с манифестом без учёта
-  /// регистра. При несовпадении файлы удаляются и возвращается [IntegrityError]
-  /// — установка не запускается.
+  /// [VersionManifest.apkPath], затем сам файл. Если это zip — распаковываем и
+  /// берём единственный `.apk` из архива. Затем считаем SHA-256 итогового APK и
+  /// сравниваем с манифестом без учёта регистра. При несовпадении файлы
+  /// удаляются и возвращается [IntegrityError] — установка не запускается.
   Future<Result<File>> downloadApk(
     VersionManifest manifest, {
     Directory? targetDir,
@@ -105,23 +109,25 @@ class UpdateRepository {
     try {
       final dir = targetDir ?? await getTemporaryDirectory();
       final href = await _resolveDownloadHref(manifest.apkPath);
-      final zipFile = File(p.join(dir.path, 'tsd_update.zip'));
+      // Скачиваем под временным именем с тем же расширением, что в apkPath.
+      final isZip = manifest.apkPath.toLowerCase().endsWith('.zip');
+      final downloaded = File(p.join(dir.path, isZip ? 'tsd_update.zip' : 'tsd_update.apk'));
       await _dio.download(
         href,
-        zipFile.path,
+        downloaded.path,
         onReceiveProgress: onProgress,
         deleteOnError: true,
       );
-      // Распаковываем архив, извлекаем единственный .apk.
-      final apkFile = await _extractApk(zipFile, dir);
+      // zip → распаковываем и берём .apk; голый .apk → оставляем как есть.
+      final apkFile = isZip ? await _extractApk(downloaded, dir) : downloaded;
       // Обязательная проверка целостности до запуска установщика.
       final actual = await _sha256OfFile(apkFile);
       if (actual.toLowerCase() != manifest.sha256.toLowerCase()) {
         _log.warning(
           'SHA-256 не совпал: expected=${manifest.sha256} actual=$actual; '
-          'удаляю APK и zip',
+          'удаляю файлы обновления',
         );
-        await _tryDelete(zipFile);
+        await _tryDelete(downloaded);
         await _tryDelete(apkFile);
         return const Failure(IntegrityError());
       }

@@ -11,6 +11,12 @@ param(
     [switch]$BuildOnly,
     [switch]$Force,
 
+    # Формат публикации APK на Диске. Приложение умеет читать оба.
+    #   apk — залить готовый .apk (по умолчанию, проще).
+    #   zip — упаковать .apk в .zip (исторический формат).
+    [ValidateSet("apk", "zip")]
+    [string]$Format = "apk",
+
     # Путь к папке с обновлениями на Яндекс Диске (где лежат manifest.json и
     # каталог releases/). Например: "APK NO DELETE/ТСД".
     [string]$DiskFolder = "APK NO DELETE/ТСД",
@@ -111,12 +117,15 @@ $distDirectory = Join-Path $projectRoot "dist"
 $manifestPath = Join-Path $distDirectory "manifest.json"
 $sourceApkPath = Join-Path $projectRoot "build\app\outputs\flutter-apk\app-release.apk"
 $apkFileName = "tsd-inventory-$versionName-$versionCode"
-# APK публикуется zip-архивом (приложение скачивает zip и распаковывает).
-$localZipPath = Join-Path $distDirectory "$apkFileName.zip"
-$zipName = "$apkFileName.zip"
-# Путь к архиву относительно публичной папки Диска (тот же, что в apkPath манифеста).
-$apkPath = "releases/$zipName"
-# Полный путь на Диске (от корня Диска): <папка>/releases/<zip>.
+# Формат публикации: apk (готовый .apk) или zip (apk внутри .zip). Приложение
+# умеет читать оба (см. update_repository.dart — автоопределение по расширению).
+$publishExtension = if ($Format -eq "zip") { "zip" } else { "apk" }
+# Локальный публикуемый файл (apk напрямую или zip с apk внутри).
+$localPublishPath = Join-Path $distDirectory "$apkFileName.$publishExtension"
+$publishName = "$apkFileName.$publishExtension"
+# Путь к файлу относительно публичной папки Диска (тот же, что в apkPath манифеста).
+$apkPath = "releases/$publishName"
+# Полный путь на Диске (от корня Диска): <папка>/releases/<файл>.
 $diskReleasesPrefix = ($DiskFolder.TrimEnd('/').TrimEnd('\') + "/releases") -replace '\\', '/'
 
 if (-not (Test-Path -LiteralPath $distDirectory -PathType Container)) {
@@ -166,12 +175,17 @@ if (-not (Test-Path -LiteralPath $sourceApkPath -PathType Leaf)) {
 Write-Host "[2/5] Calculating SHA-256..." -ForegroundColor Cyan
 $sha256 = (Get-FileHash -LiteralPath $sourceApkPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
-# Упакуем APK в zip: так он хранится и публикуется на Диске.
-Write-Host "[2.5/5] Packaging APK into zip..." -ForegroundColor Cyan
-if (Test-Path -LiteralPath $localZipPath) {
-    Remove-Item -LiteralPath $localZipPath -Force
+# Подготовка публикуемого файла: apk напрямую или zip с apk внутри.
+if ($Format -eq "zip") {
+    Write-Host "[2.5/5] Packaging APK into zip..." -ForegroundColor Cyan
+    if (Test-Path -LiteralPath $localPublishPath) {
+        Remove-Item -LiteralPath $localPublishPath -Force
+    }
+    Compress-Archive -LiteralPath $sourceApkPath -DestinationPath $localPublishPath -CompressionLevel Optimal
+} else {
+    Write-Host "[2.5/5] Copying APK as-is ($Format)..." -ForegroundColor Cyan
+    Copy-Item -LiteralPath $sourceApkPath -Destination $localPublishPath -Force
 }
-Compress-Archive -LiteralPath $sourceApkPath -DestinationPath $localZipPath -CompressionLevel Optimal
 
 $manifest = [ordered]@{
     versionName = $versionName
@@ -187,7 +201,7 @@ Write-Utf8WithoutBom -Path $manifestPath -Value $manifestJson
 
 Write-Host "[3/5] Manifest generated: $manifestPath" -ForegroundColor Cyan
 Write-Host "       APK:       $sourceApkPath"
-Write-Host "       ZIP:       $localZipPath"
+Write-Host "       Publish:   $localPublishPath ($Format)"
 Write-Host "       apkPath:   $apkPath"
 Write-Host "       SHA-256:   $sha256"
 Write-Host "       Required:  $([bool]$Required)"
@@ -220,11 +234,11 @@ if (-not $BuildOnly) {
         Invoke-RestMethod -Uri $href -Method Put -InFile $LocalPath -ContentType "application/octet-stream" | Out-Null
     }
 
-    # Сначала zip (APK), последним — manifest.json: чтобы клиенты не увидели
-    # манифест, ссылающийся на ещё не залитый архив.
-    Write-Host "[4/5] Uploading APK zip to Yandex Disk..." -ForegroundColor Cyan
-    $zipDiskPath = "$diskReleasesPrefix/$zipName"
-    Send-ToDisk -LocalPath $localZipPath -DiskPath $zipDiskPath
+    # Сначала APK-файл (apk или zip), последним — manifest.json: чтобы клиенты
+    # не увидели манифест, ссылающийся на ещё не залитый файл.
+    Write-Host "[4/5] Uploading APK ($Format) to Yandex Disk..." -ForegroundColor Cyan
+    $apkDiskPath = "$diskReleasesPrefix/$publishName"
+    Send-ToDisk -LocalPath $localPublishPath -DiskPath $apkDiskPath
 
     Write-Host "[5/5] Uploading manifest last..." -ForegroundColor Cyan
     $manifestDiskPath = ($DiskFolder.TrimEnd('/').TrimEnd('\') + "/manifest.json") -replace '\\', '/'
@@ -236,8 +250,8 @@ else {
     Write-Host "[4/5] Upload skipped (-BuildOnly)." -ForegroundColor Yellow
     Write-Host "[5/5] Upload skipped (-BuildOnly)." -ForegroundColor Yellow
     Write-Host "Manual upload to Yandex Disk folder '$DiskFolder':" -ForegroundColor Yellow
-    Write-Host "  - $localZipPath  ->  $DiskFolder/releases/$zipName" -ForegroundColor Yellow
-    Write-Host "  - $manifestPath  ->  $DiskFolder/manifest.json   (APK FIRST, manifest LAST)" -ForegroundColor Yellow
+    Write-Host "  - $localPublishPath  ->  $DiskFolder/releases/$publishName" -ForegroundColor Yellow
+    Write-Host "  - $manifestPath      ->  $DiskFolder/manifest.json   (APK FIRST, manifest LAST)" -ForegroundColor Yellow
 }
 
 if ($InstallToTsd) {
