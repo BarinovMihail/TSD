@@ -229,6 +229,48 @@ void main() {
       expect(res, isA<Failure>());
       expect((res as Failure).error, isA<NetworkError>());
     });
+
+    test(
+      'HTTP 404 → Success([]): характеристики не найдены, диалог не блокируется '
+      '(в т.ч. номенклатуры со слэшом, ломающим URL)',
+      () async {
+        when(() => client.getJson<dynamic>(any())).thenThrow(
+          DioException(
+            requestOptions: RequestOptions(path: ''),
+            response: Response(
+              requestOptions: RequestOptions(path: ''),
+              statusCode: 404,
+            ),
+            type: DioExceptionType.badResponse,
+          ),
+        );
+        final repo = InventoryRepository(client: client, db: db);
+
+        final res = await repo.getCharacteristics('яяя_Удлинитель/10.9/');
+
+        expect(res, isA<Success>());
+        expect((res as Success<List<String>>).value, isEmpty);
+      },
+    );
+
+    test('HTTP 500 по-прежнему → Failure(ServerError)', () async {
+      when(() => client.getJson<dynamic>(any())).thenThrow(
+        DioException(
+          requestOptions: RequestOptions(path: ''),
+          response: Response(
+            requestOptions: RequestOptions(path: ''),
+            statusCode: 500,
+          ),
+          type: DioExceptionType.badResponse,
+        ),
+      );
+      final repo = InventoryRepository(client: client, db: db);
+
+      final res = await repo.getCharacteristics('Монитор');
+
+      expect(res, isA<Failure>());
+      expect((res as Failure).error, isA<ServerError>());
+    });
   });
 
   group('addBarcode — добавление штрихкода в 1С', () {
