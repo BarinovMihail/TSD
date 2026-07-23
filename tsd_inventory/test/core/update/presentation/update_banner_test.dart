@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:tsd_inventory/core/config/app_config.dart';
 import 'package:tsd_inventory/core/update/application/update_controller.dart';
 import 'package:tsd_inventory/core/update/data/apk_installer.dart';
 import 'package:tsd_inventory/core/update/data/update_repository.dart';
@@ -15,10 +14,9 @@ class _MockInstaller extends Mock implements ApkInstaller {}
 const _manifest = VersionManifest(
   versionCode: 9,
   versionName: '0.2.7',
-  apkUrl: 'https://storage.example/update.apk',
+  apkPath: 'releases/tsd-inventory-0.2.7-9.zip',
   releaseNotes: 'Добавлена плашка обновления',
   sha256: 'abc',
-  urlExpiresInSec: 600,
   required: false,
 );
 
@@ -27,7 +25,6 @@ void main() {
 
   setUp(() {
     controller = UpdateController(
-      config: const AppConfig(baseUrl: 'http://test-host/erp/'),
       repo: _MockRepo(),
       installer: _MockInstaller(),
       currentVersionCodeProvider: () async => 8,

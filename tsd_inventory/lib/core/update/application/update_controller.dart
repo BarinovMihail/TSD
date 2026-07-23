@@ -2,13 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logging/logging.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:tsd_inventory/core/config/app_config.dart';
-import 'package:tsd_inventory/core/network/dio_client.dart';
 import 'package:tsd_inventory/core/update/data/apk_installer.dart';
 import 'package:tsd_inventory/core/update/data/update_repository.dart';
+import 'package:tsd_inventory/core/update/data/yandex_disk_update_config.dart';
 import 'package:tsd_inventory/core/update/domain/version_manifest.dart';
-
-import '../../../features/auth/application/auth_controller.dart';
 
 final _log = Logger('update_controller');
 
@@ -57,23 +54,20 @@ class UpdateError extends UpdateState {
 /// [UpdateError]). При `UpdateAvailable` пользователь жмёт «Обновить» →
 /// `downloadAndInstall()` → [UpdateDownloading] → [UpdateInstalling].
 ///
-/// Манифест запрашивается у 1С через [AppConfig.inventoryPath]('update') под
-/// Basic-аутентификацией текущей сессии пользователя. Проверка запускается UI
-/// только после успешного входа в 1С — провайдер читается на DocsListScreen.
+/// Манифест запрашивается из публичной папки Яндекс Диска через
+/// [UpdateRepository] (без авторизации). Проверка запускается UI только после
+/// успешного входа в 1С — провайдер читается на DocsListScreen.
 /// Защита от повторных параллельных проверок — в [checkAndPrompt] (if not idle).
 class UpdateController extends ChangeNotifier {
   UpdateController({
-    required AppConfig config,
     required UpdateRepository repo,
     required ApkInstaller installer,
     Future<int> Function()? currentVersionCodeProvider,
-  }) : _config = config,
-       _repo = repo,
+  }) : _repo = repo,
        _installer = installer,
        _currentVersionCodeProvider =
            currentVersionCodeProvider ?? _defaultVersionCode;
 
-  final AppConfig _config;
   final UpdateRepository _repo;
   final ApkInstaller _installer;
   final Future<int> Function() _currentVersionCodeProvider;
@@ -96,12 +90,9 @@ class UpdateController extends ChangeNotifier {
     state = const UpdateChecking();
     notifyListeners();
 
-    // DioClient ожидает ОТНОСИТЕЛЬНЫЙ путь ('hs/inventory/...'), а не полный
-    // URL: он сам склеит его с baseUrl (+ failover по хостам). Поэтому здесь
-    // именно относительный путь, а не AppConfig.inventoryPath('update')
-    // (который вернул бы полный URL и при склейке получил бы дублирование).
-    const path = 'hs/inventory/update';
-    final res = await _repo.checkForUpdate(path);
+    // Манифест читается из публичной папки Яндекс Диска (см. UpdateRepository);
+    // никаких путей/авторизации 1С больше не нужно.
+    final res = await _repo.checkForUpdate();
     final manifest = res.maybeWhen<VersionManifest?>(
       onValue: (m) {
         _log.info(
@@ -137,7 +128,7 @@ class UpdateController extends ChangeNotifier {
     if (s is! UpdateAvailable) return;
     final manifest = s.manifest;
 
-    // Нет подписанной ссылки или хеша → установить нельзя.
+    // Нет apkPath или хеша → установить нельзя.
     if (!manifest.isValid) {
       state = const UpdateError('Манифест обновления некорректен');
       notifyListeners();
@@ -148,8 +139,7 @@ class UpdateController extends ChangeNotifier {
     notifyListeners();
 
     final res = await _repo.downloadApk(
-      manifest.apkUrl,
-      sha256: manifest.sha256,
+      manifest,
       onProgress: (r, t) {
         final p = t > 0 ? r / t : null;
         state = UpdateDownloading(p);
@@ -180,17 +170,17 @@ class UpdateController extends ChangeNotifier {
 
   /// Повторно запросить манифест и сразу начать установку.
   ///
-  /// Плашка может оставаться на экране дольше, чем живёт подписанная
-  /// `apkUrl`. Поэтому перед скачиванием всегда получаем у 1С свежую
-  /// временную ссылку и ещё раз проверяем, что версия новее.
+  /// Плашка может оставаться на экране долго. Поэтому перед скачиванием всегда
+  /// получаем свежий манифест и ещё раз проверяем, что версия новее. Временные
+  /// ссылки на скачивание Яндекс Диск выдаёт при каждом запросе файла, поэтому
+  /// проблем с «протуханием» быть не может.
   Future<void> downloadLatestAndInstall() async {
     if (state is! UpdateAvailable && state is! UpdateError) return;
 
     state = const UpdateChecking();
     notifyListeners();
 
-    const path = 'hs/inventory/update';
-    final res = await _repo.checkForUpdate(path);
+    final res = await _repo.checkForUpdate();
     String? errorMessage;
     final manifest = res.maybeWhen<VersionManifest?>(
       onValue: (value) => value,
@@ -233,27 +223,12 @@ class UpdateController extends ChangeNotifier {
   }
 }
 
-final updateControllerProvider = ChangeNotifierProvider<UpdateController>((
-  ref,
-) {
-  final config = ref.watch(appConfigProvider);
-  // Сессия обязательна: провайдер читается только после успешного входа
-  // (на DocsListScreen). До входа автообновление не должно работать —
-  // endpoint 1С требует Basic-аутентификации.
-  final session = ref.watch(authControllerProvider).session;
-  if (session == null) {
-    throw StateError(
-      'updateControllerProvider: авторизация ещё не выполнена (нет сессии)',
-    );
-  }
+final updateControllerProvider = ChangeNotifierProvider<UpdateController>((ref) {
+  // Источник обновлений — публичная папка Яндекс Диска, авторизация не нужна.
+  // Защиту «только после входа в 1С» обеспечивает экран DocsListScreen:
+  // провайдер читается именно там (после успешной авторизации).
   return UpdateController(
-    config: config,
-    repo: UpdateRepository(
-      client: DioClient(
-        config: config,
-        credentials: BasicCredentials(session.login, session.password),
-      ),
-    ),
+    repo: UpdateRepository(config: kYandexDiskUpdateConfig),
     installer: ApkInstaller(),
   );
 });

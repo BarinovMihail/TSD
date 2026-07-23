@@ -1,8 +1,8 @@
 {
-    "versionName":  "0.2.10",
-    "versionCode":  12,
-    "apkKey":  "releases/tsd-inventory-0.2.10-12.apk",
-    "sha256":  "157b12b7207dcbd8722213dc321af6a9d177ca455555af5a04e8df4a370b093b",
-    "releaseNotes":  "Предупреждение перед перезаписью шк",
+    "versionName":  "0.2.12",
+    "versionCode":  14,
+    "apkPath":  "releases/tsd-inventory-0.2.12-14.zip",
+    "sha256":  "b1b437792bced2a7b0e151108afb22bc67bf671d3f3419ccfc43d8f1559a5c10",
+    "releaseNotes":  "Перевод обновлений на Яндекс Диск",
     "required":  false
 }

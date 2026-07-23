@@ -27,8 +27,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.initState();
     // Восстановить сохранённые логин/пароль для активной базы и состояние чекбоксов.
     _restoreSavedCredentials();
-    // Проверка обновлений выполняется после успешного входа на DocsListScreen:
-    // endpoint 1С /hs/inventory/update требует Basic-аутентификации сессии.
+    // Проверка обновлений выполняется после успешного входа на DocsListScreen
+    // (источник — публичная папка Яндекс Диска, авторизация не нужна).
   }
 
   Future<void> _restoreSavedCredentials() async {

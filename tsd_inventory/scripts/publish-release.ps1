@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Position = 0)]
     [string]$Version,
@@ -11,14 +11,18 @@ param(
     [switch]$BuildOnly,
     [switch]$Force,
 
-    [ValidateSet("Auto", "yc", "aws")]
-    [string]$UploadTool = "Auto",
+    # Путь к папке с обновлениями на Яндекс Диске (где лежат manifest.json и
+    # каталог releases/). Например: "APK NO DELETE/ТСД".
+    [string]$DiskFolder = "APK NO DELETE/ТСД",
 
-    [string]$Bucket = "tsd-inventory-updates-b1g3poudt",
+    # OAuth-токен Яндекс Диска для выгрузки. Если не передан явно, читается из
+    # переменной окружения $env:YANDEX_DISK_OAUTH_TOKEN. Нужен только скрипту;
+    # в само приложение токен НЕ попадает (приложение читает публичную папку).
+    [string]$OAuthToken,
+
     [string]$DeviceId = "2502410",
     [string]$PackageName = "ru.tsd.tsd_inventory",
-    [string]$AdbPath = "C:\Android\Sdk\platform-tools\adb.exe",
-    [string]$S3Endpoint = "https://storage.yandexcloud.net"
+    [string]$AdbPath = "C:\Android\Sdk\platform-tools\adb.exe"
 )
 
 Set-StrictMode -Version Latest
@@ -106,8 +110,14 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $distDirectory = Join-Path $projectRoot "dist"
 $manifestPath = Join-Path $distDirectory "manifest.json"
 $sourceApkPath = Join-Path $projectRoot "build\app\outputs\flutter-apk\app-release.apk"
-$apkFileName = "tsd-inventory-$versionName-$versionCode.apk"
-$apkKey = "releases/$apkFileName"
+$apkFileName = "tsd-inventory-$versionName-$versionCode"
+# APK публикуется zip-архивом (приложение скачивает zip и распаковывает).
+$localZipPath = Join-Path $distDirectory "$apkFileName.zip"
+$zipName = "$apkFileName.zip"
+# Путь к архиву относительно публичной папки Диска (тот же, что в apkPath манифеста).
+$apkPath = "releases/$zipName"
+# Полный путь на Диске (от корня Диска): <папка>/releases/<zip>.
+$diskReleasesPrefix = ($DiskFolder.TrimEnd('/').TrimEnd('\') + "/releases") -replace '\\', '/'
 
 if (-not (Test-Path -LiteralPath $distDirectory -PathType Container)) {
     New-Item -ItemType Directory -Path $distDirectory -Force | Out-Null
@@ -156,10 +166,17 @@ if (-not (Test-Path -LiteralPath $sourceApkPath -PathType Leaf)) {
 Write-Host "[2/5] Calculating SHA-256..." -ForegroundColor Cyan
 $sha256 = (Get-FileHash -LiteralPath $sourceApkPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
+# Упакуем APK в zip: так он хранится и публикуется на Диске.
+Write-Host "[2.5/5] Packaging APK into zip..." -ForegroundColor Cyan
+if (Test-Path -LiteralPath $localZipPath) {
+    Remove-Item -LiteralPath $localZipPath -Force
+}
+Compress-Archive -LiteralPath $sourceApkPath -DestinationPath $localZipPath -CompressionLevel Optimal
+
 $manifest = [ordered]@{
     versionName = $versionName
     versionCode = $versionCode
-    apkKey = $apkKey
+    apkPath = $apkPath
     sha256 = $sha256
     releaseNotes = $ReleaseNotes.Trim()
     required = [bool]$Required
@@ -170,95 +187,57 @@ Write-Utf8WithoutBom -Path $manifestPath -Value $manifestJson
 
 Write-Host "[3/5] Manifest generated: $manifestPath" -ForegroundColor Cyan
 Write-Host "       APK:       $sourceApkPath"
-Write-Host "       Object:    $apkKey"
+Write-Host "       ZIP:       $localZipPath"
+Write-Host "       apkPath:   $apkPath"
 Write-Host "       SHA-256:   $sha256"
 Write-Host "       Required:  $([bool]$Required)"
 
 if (-not $BuildOnly) {
-    $selectedUploadTool = $UploadTool
-    $ycPath = Resolve-CommandPath -Name "yc"
-    $awsPath = Resolve-CommandPath -Name "aws"
-
-    if ($selectedUploadTool -eq "Auto") {
-        if (-not [string]::IsNullOrWhiteSpace($ycPath)) {
-            $selectedUploadTool = "yc"
-        }
-        elseif (-not [string]::IsNullOrWhiteSpace($awsPath)) {
-            $selectedUploadTool = "aws"
-        }
-        else {
-            throw "Neither Yandex Cloud CLI ('yc') nor AWS CLI ('aws') was found. Install and authenticate one of them, or use -BuildOnly."
-        }
+    if ([string]::IsNullOrWhiteSpace($OAuthToken)) {
+        $OAuthToken = $env:YANDEX_DISK_OAUTH_TOKEN
+    }
+    if ([string]::IsNullOrWhiteSpace($OAuthToken)) {
+        throw "No Yandex Disk OAuth token. Pass -OAuthToken or set $env:YANDEX_DISK_OAUTH_TOKEN, or use -BuildOnly."
     }
 
-    $apkUri = "s3://$Bucket/$apkKey"
-    $manifestUri = "s3://$Bucket/manifest.json"
+    $apiBase = "https://cloud-api.yandex.net/v1/disk"
 
-    Write-Host "[4/5] Uploading APK with $selectedUploadTool..." -ForegroundColor Cyan
-
-    if ($selectedUploadTool -eq "yc") {
-        if ([string]::IsNullOrWhiteSpace($ycPath)) {
-            throw "Yandex Cloud CLI ('yc') was not found in PATH."
-        }
-
-        # The APK is uploaded first. The manifest remains unchanged if this fails.
-        Invoke-NativeCommand -FilePath $ycPath -Arguments @(
-            "storage", "s3", "cp", $sourceApkPath, $apkUri
-        )
-        Invoke-NativeCommand -FilePath $ycPath -Arguments @(
-            "storage", "s3api", "head-object",
-            "--bucket", $Bucket,
-            "--key", $apkKey
-        )
-
-        Write-Host "[5/5] Uploading manifest last..." -ForegroundColor Cyan
-        Invoke-NativeCommand -FilePath $ycPath -Arguments @(
-            "storage", "s3", "cp", $manifestPath, $manifestUri
-        )
-        Invoke-NativeCommand -FilePath $ycPath -Arguments @(
-            "storage", "s3api", "head-object",
-            "--bucket", $Bucket,
-            "--key", "manifest.json"
-        )
+    # Запрос временной прямой ссылки для загрузки файла (PUT) на Диск.
+    # Возвращает JSON { href, method }. Перезаписываем существующий файл.
+    function Get-UploadHref {
+        param([string]$DiskPath)
+        $encodedPath = [uri]::EscapeDataString($DiskPath)
+        $url = "$apiBase/resources/upload?path=$encodedPath&overwrite=true"
+        $resp = Invoke-RestMethod -Uri $url -Method Get -Headers @{ Authorization = "OAuth $OAuthToken" }
+        return $resp.href
     }
-    else {
-        if ([string]::IsNullOrWhiteSpace($awsPath)) {
-            throw "AWS CLI ('aws') was not found in PATH."
-        }
 
-        # AWS CLI reads credentials from its profile or AWS_* environment variables.
-        Invoke-NativeCommand -FilePath $awsPath -Arguments @(
-            "--endpoint-url=$S3Endpoint",
-            "s3", "cp", $sourceApkPath, $apkUri,
-            "--content-type", "application/vnd.android.package-archive",
-            "--only-show-errors"
-        )
-        Invoke-NativeCommand -FilePath $awsPath -Arguments @(
-            "--endpoint-url=$S3Endpoint",
-            "s3api", "head-object",
-            "--bucket", $Bucket,
-            "--key", $apkKey
-        )
-
-        Write-Host "[5/5] Uploading manifest last..." -ForegroundColor Cyan
-        Invoke-NativeCommand -FilePath $awsPath -Arguments @(
-            "--endpoint-url=$S3Endpoint",
-            "s3", "cp", $manifestPath, $manifestUri,
-            "--content-type", "application/json",
-            "--cache-control", "no-store",
-            "--only-show-errors"
-        )
-        Invoke-NativeCommand -FilePath $awsPath -Arguments @(
-            "--endpoint-url=$S3Endpoint",
-            "s3api", "head-object",
-            "--bucket", $Bucket,
-            "--key", "manifest.json"
-        )
+    # Загрузка байтов локального файла на Диск по выданной ссылке (HTTP PUT).
+    function Send-ToDisk {
+        param([string]$LocalPath, [string]$DiskPath)
+        Write-Host "       -> $DiskPath" -ForegroundColor DarkGray
+        $href = Get-UploadHref -DiskPath $DiskPath
+        Invoke-RestMethod -Uri $href -Method Put -InFile $LocalPath -ContentType "application/octet-stream" | Out-Null
     }
+
+    # Сначала zip (APK), последним — manifest.json: чтобы клиенты не увидели
+    # манифест, ссылающийся на ещё не залитый архив.
+    Write-Host "[4/5] Uploading APK zip to Yandex Disk..." -ForegroundColor Cyan
+    $zipDiskPath = "$diskReleasesPrefix/$zipName"
+    Send-ToDisk -LocalPath $localZipPath -DiskPath $zipDiskPath
+
+    Write-Host "[5/5] Uploading manifest last..." -ForegroundColor Cyan
+    $manifestDiskPath = ($DiskFolder.TrimEnd('/').TrimEnd('\') + "/manifest.json") -replace '\\', '/'
+    Send-ToDisk -LocalPath $manifestPath -DiskPath $manifestDiskPath
+
+    Write-Host "Upload to Yandex Disk complete: $DiskFolder" -ForegroundColor Green
 }
 else {
     Write-Host "[4/5] Upload skipped (-BuildOnly)." -ForegroundColor Yellow
     Write-Host "[5/5] Upload skipped (-BuildOnly)." -ForegroundColor Yellow
+    Write-Host "Manual upload to Yandex Disk folder '$DiskFolder':" -ForegroundColor Yellow
+    Write-Host "  - $localZipPath  ->  $DiskFolder/releases/$zipName" -ForegroundColor Yellow
+    Write-Host "  - $manifestPath  ->  $DiskFolder/manifest.json   (APK FIRST, manifest LAST)" -ForegroundColor Yellow
 }
 
 if ($InstallToTsd) {

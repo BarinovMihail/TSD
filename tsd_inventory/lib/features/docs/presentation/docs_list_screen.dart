@@ -43,17 +43,16 @@ class _DocsListScreenState extends ConsumerState<DocsListScreen>
   DateTime? _lastUpdateCheckAt;
 
   /// Ссылка на контроллер обновлений: сохраняем при запуске проверки, чтобы
-  /// безопасно снять слушателя в dispose (к моменту dispose сессия может уже
-  /// быть сброшена logout-ом, и ref.read(updateControllerProvider) выбросит
-  /// StateError — провайдер требует сессии).
+  /// безопасно снять слушателя в dispose.
   UpdateController? _updateController;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Проверка обновлений — после успешной авторизации (сессия уже есть),
-    // endpoint 1С /hs/inventory/update защищён Basic-аутентификацией.
+    // Проверка обновлений — после успешной авторизации (сессия уже есть):
+    // источник обновлений теперь публичная папка Яндекс Диска, но проверять
+    // логично именно после входа, чтобы не мешать экрану логина.
     // Post-frame, чтобы showDialog шёл от построенного контекста экрана.
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _checkForUpdates(force: true),
@@ -113,8 +112,8 @@ class _DocsListScreenState extends ConsumerState<DocsListScreen>
       controller.addListener(_onUpdateStateChanged);
       await controller.checkAndPrompt();
     } catch (e) {
-      // Случиться не должно (провайдер требует сессии, а мы уже на docs-экране),
-      // но ошибка проверки обновления никогда не должна мешать работе.
+      // Случиться не должно, но ошибка проверки обновления никогда не должна
+      // мешать работе.
       debugPrint('Проверка обновления не запустилась: $e');
     }
   }

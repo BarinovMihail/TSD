@@ -14,12 +14,12 @@ class AppConfig {
 
   /// Удалённая база ERP (db-srv14, основная). Сервис опубликован как `erp`
   /// (нижний регистр). Имя хоста db-srv14 — основной сетевой путь.
-  static const remoteUrl = 'http://db-srv14/erp/';
+  static const remoteUrl = 'http://db-srv13/erp/';
 
   /// Резервный адрес той же базы ERP — по IP, на случай если hostname db-srv14
   /// не резолвится/недоступен со стороны ТСД. Переключение на него прозрачно
   /// происходит в [DioClient] только при сетевой ошибке/тайм-ауте.
-  static const remoteUrlFallback = 'http://192.168.1.212/erp/';
+  static const remoteUrlFallback = 'http://193.168.1.212/erp/';
 
   /// Все сетевые адреса базы ERP (основной + резервные) для failover в Dio.
   static const remoteHosts = [remoteUrl, remoteUrlFallback];
@@ -32,8 +32,9 @@ class AppConfig {
   final int receiveTimeoutSec;
 
   /// Конструирует полный путь: baseUrl + '/hs/inventory/' + path.
-  /// Используется для всех запросов к 1С, включая защищённый Basic-аутентификацией
-  /// эндпоинт автообновления: `inventoryPath('update')`.
+  /// Используется для запросов к 1С (например, `inventoryPath('updateFact')`).
+  /// Автообновление здесь больше не проходит: оно читается из публичной папки
+  /// Яндекс Диска (см. `core/update`).
   String inventoryPath(String path) {
     final base = baseUrl.endsWith('/')
         ? baseUrl.substring(0, baseUrl.length - 1)

@@ -2,137 +2,191 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:tsd_inventory/core/config/app_config.dart';
 import 'package:tsd_inventory/core/network/api_error.dart';
-import 'package:tsd_inventory/core/network/dio_client.dart';
 import 'package:tsd_inventory/core/result/result.dart';
 import 'package:tsd_inventory/core/update/data/update_repository.dart';
+import 'package:tsd_inventory/core/update/data/yandex_disk_update_config.dart';
+import 'package:tsd_inventory/core/update/domain/version_manifest.dart';
 
-import '../../../helpers/mock_adapter.dart';
+const _testConfig = YandexDiskUpdateConfig(
+  publicKey: 'https://disk.yandex.ru/d/test',
+  manifestPath: 'manifest.json',
+  apiBase: 'https://cloud-api.yandex.net/v1/disk',
+);
 
-/// Конфиг с одним хостом, чтобы failover не дублировал запросы в тестах.
-const _testConfig = AppConfig(baseUrl: 'http://test-host/erp/');
+const _fakeDownloaderUrl = 'https://downloader.disk.yandex.ru/disk/fake-test';
 
-/// Авторизованный клиент 1С + его MockAdapter (Basic Auth на месте).
-class _Authed {
-  _Authed() : adapter = MockAdapter(recordRequests: true), dio = Dio() {
-    dio.httpClientAdapter = adapter;
-    client = DioClient(
-      config: _testConfig,
-      credentials: const BasicCredentials('user', 'pass'),
-      dio: dio,
+/// Адаптер, маршрутизирующий запросы по URL:
+/// - к эндпоинту `public/resources/download` (resolve) → [resolveJson] или
+///   [resolveError];
+/// - к скачиванию файла по выданному href → [downloadBytes] (или
+///   [downloadError]).
+///
+/// Записывает все запросы в [requests] (для проверки отсутствия авторизации).
+class _DiskMockAdapter implements HttpClientAdapter {
+  _DiskMockAdapter({this.recordRequests = false});
+
+  /// Тело ответа resolve (JSON как строка). По умолчанию отдаёт фейковый href.
+  String resolveJson = jsonEncode({'href': _fakeDownloaderUrl});
+
+  /// Ошибка на этапе resolve (приоритет над [resolveJson]).
+  DioException? resolveError;
+
+  /// Байты, отдаваемые «скачиванием» (манифест или zip).
+  List<int> downloadBytes = const [];
+
+  /// Ошибка на этапе скачивания (приоритет над [downloadBytes]).
+  DioException? downloadError;
+
+  final bool recordRequests;
+  final List<RequestOptions> requests = [];
+
+  RequestOptions? _last;
+  String get currentPath => _last?.path ?? '';
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    _last = options;
+    if (recordRequests) requests.add(options);
+    if (options.path.contains('public/resources/download')) {
+      if (resolveError != null) throw resolveError!;
+      return ResponseBody.fromString(
+        resolveJson,
+        200,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
+    // Иначе — «скачивание» файла по выданному href.
+    if (downloadError != null) throw downloadError!;
+    return ResponseBody.fromBytes(
+      downloadBytes,
+      200,
+      headers: {
+        Headers.contentLengthHeader: ['${downloadBytes.length}'],
+      },
     );
   }
-  final MockAdapter adapter;
-  final Dio dio;
-  late final DioClient client;
+
+  @override
+  void close({bool force = false}) {}
 }
 
-Dio _dioWith(MockAdapter adapter) {
+/// Упаковать [apkBytes] в zip-архив с единственным .apk.
+List<int> _zipWithApk(Uint8List apkBytes, {String name = 'app-release.apk'}) {
+  final archive = Archive()..addFile(
+    ArchiveFile(name, apkBytes.length, apkBytes),
+  );
+  return ZipEncoder().encode(archive);
+}
+
+UpdateRepository _repo(_DiskMockAdapter adapter) =>
+    UpdateRepository(config: _testConfig, dio: _dioWith(adapter));
+
+Dio _dioWith(HttpClientAdapter adapter) {
   final dio = Dio();
   dio.httpClientAdapter = adapter;
   return dio;
 }
 
 void main() {
-  group('checkForUpdate (через защищённый endpoint 1С)', () {
+  group('checkForUpdate (через публичный API Диска)', () {
     test('корректный манифест → Success(VersionManifest)', () async {
-      final a = _Authed();
-      a.adapter.response = ResponseBody.fromString(
+      final adapter = _DiskMockAdapter();
+      adapter.downloadBytes = utf8.encode(
         jsonEncode({
           'versionName': '0.2.6',
           'versionCode': 8,
-          'apkUrl': 'https://storage.example/file.apk?sig=abc',
-          'urlExpiresInSec': 600,
+          'apkPath': 'releases/tsd-inventory-0.2.6-8.zip',
           'sha256': 'deadbeef',
           'releaseNotes': 'Новое',
           'required': false,
         }),
-        200,
-        headers: {
-          Headers.contentTypeHeader: ['application/json'],
-        },
       );
-      final repo = UpdateRepository(client: a.client, downloadDio: Dio());
+      final repo = _repo(adapter);
 
-      final res = await repo.checkForUpdate('hs/inventory/update');
+      final res = await repo.checkForUpdate();
 
       expect(res, isA<Success>());
-      final m = (res as Success).value;
+      final m = (res as Success).value as VersionManifest;
       expect(m.versionCode, 8);
       expect(m.versionName, '0.2.6');
-      expect(m.apkUrl, 'https://storage.example/file.apk?sig=abc');
+      expect(m.apkPath, 'releases/tsd-inventory-0.2.6-8.zip');
       expect(m.sha256, 'deadbeef');
     });
 
-    test(
-      'запрос идёт под Basic Auth, без WordPress cookies/X-Update-Token',
-      () async {
-        final a = _Authed();
-        a.adapter.response = ResponseBody.fromString(
-          jsonEncode({}),
-          200,
-          headers: {
-            Headers.contentTypeHeader: ['application/json'],
-          },
-        );
-        final repo = UpdateRepository(client: a.client, downloadDio: Dio());
+    test('запрос идёт БЕЗ авторизации (публичная папка)', () async {
+      final adapter = _DiskMockAdapter(recordRequests: true);
+      adapter.downloadBytes = utf8.encode(jsonEncode({}));
+      final repo = _repo(adapter);
 
-        await repo.checkForUpdate('hs/inventory/update');
+      await repo.checkForUpdate();
 
-        final req = a.adapter.requests.first;
-        expect(req.headers['Authorization']?.startsWith('Basic '), isTrue);
-        expect(req.headers['Cookie'], isNull);
-        expect(req.headers['X-Update-Token'], isNull);
-      },
-    );
-
-    test('пустой URL → Failure (фича выключена)', () async {
-      final a = _Authed();
-      final repo = UpdateRepository(client: a.client, downloadDio: Dio());
-      final res = await repo.checkForUpdate('');
-      expect(res, isA<Failure>());
-      expect((res as Failure).error, isA<NetworkError>());
+      for (final req in adapter.requests) {
+        expect(req.headers['Authorization'], isNull);
+      }
     });
 
-    test('сеть недоступна (connectionError) → Failure(NetworkError)', () async {
-      final a = _Authed();
-      a.adapter.error = DioException(
+    test('путь к файлу передаётся с ведущим /', () async {
+      // Регрессия: публичный API Диска требует path с ведущим слэшем.
+      final adapter = _DiskMockAdapter(recordRequests: true);
+      adapter.downloadBytes = utf8.encode(jsonEncode({}));
+      final repo = _repo(adapter);
+
+      await repo.checkForUpdate();
+
+      final resolveReq = adapter.requests.firstWhere(
+        (r) => r.path.contains('public/resources/download'),
+      );
+      expect(resolveReq.queryParameters['path'], '/manifest.json');
+      expect(resolveReq.queryParameters['public_key'], _testConfig.publicKey);
+    });
+
+    test('сеть недоступна на resolve (connectionError) → Failure(NetworkError)',
+        () async {
+      final adapter = _DiskMockAdapter();
+      adapter.resolveError = DioException(
         requestOptions: RequestOptions(path: ''),
         type: DioExceptionType.connectionError,
       );
-      final repo = UpdateRepository(client: a.client, downloadDio: Dio());
+      final repo = _repo(adapter);
 
-      final res = await repo.checkForUpdate('hs/inventory/update');
+      final res = await repo.checkForUpdate();
 
       expect(res, isA<Failure>());
       expect((res as Failure).error, isA<NetworkError>());
     });
 
-    test('401 → Failure(AuthError)', () async {
-      final a = _Authed();
-      a.adapter.error = DioException(
+    test('404 (папка/манифест не найдены) → Failure(NotFoundError)', () async {
+      final adapter = _DiskMockAdapter();
+      adapter.resolveError = DioException(
         requestOptions: RequestOptions(path: ''),
         response: Response(
           requestOptions: RequestOptions(path: ''),
-          statusCode: 401,
+          statusCode: 404,
         ),
         type: DioExceptionType.badResponse,
       );
-      final repo = UpdateRepository(client: a.client, downloadDio: Dio());
+      final repo = _repo(adapter);
 
-      final res = await repo.checkForUpdate('hs/inventory/update');
+      final res = await repo.checkForUpdate();
 
       expect(res, isA<Failure>());
-      expect((res as Failure).error, isA<AuthError>());
+      expect((res as Failure).error, isA<NotFoundError>());
     });
 
-    test('502 от сервиса обновлений → Failure(ServerError)', () async {
-      final a = _Authed();
-      a.adapter.error = DioException(
+    test('502 от Диска → Failure(ServerError)', () async {
+      final adapter = _DiskMockAdapter();
+      adapter.resolveError = DioException(
         requestOptions: RequestOptions(path: ''),
         response: Response(
           requestOptions: RequestOptions(path: ''),
@@ -140,237 +194,198 @@ void main() {
         ),
         type: DioExceptionType.badResponse,
       );
-      final repo = UpdateRepository(client: a.client, downloadDio: Dio());
+      final repo = _repo(adapter);
 
-      final res = await repo.checkForUpdate('hs/inventory/update');
+      final res = await repo.checkForUpdate();
 
       expect(res, isA<Failure>());
       expect((res as Failure).error, isA<ServerError>());
     });
 
-    test('не JSON-объект (массив) → Failure(ParseError)', () async {
-      final a = _Authed();
-      a.adapter.response = ResponseBody.fromString(
-        '[1, 2, 3]',
-        200,
-        headers: {
-          Headers.contentTypeHeader: ['application/json'],
-        },
-      );
-      final repo = UpdateRepository(client: a.client, downloadDio: Dio());
+    test('манифест не JSON-объект (массив) → Failure(ParseError)', () async {
+      final adapter = _DiskMockAdapter();
+      adapter.downloadBytes = utf8.encode('[1, 2, 3]');
+      final repo = _repo(adapter);
 
-      final res = await repo.checkForUpdate('hs/inventory/update');
+      final res = await repo.checkForUpdate();
 
       expect(res, isA<Failure>());
       expect((res as Failure).error, isA<ParseError>());
     });
 
-    test('итоговый URL корректно склеен (нет дублирования baseUrl)', () async {
-      // Регрессия: относительный путь должен склеиваться с baseUrl один раз,
-      // а не дважды (раньше передавали полный URL → dio делал baseUrl+url).
-      final a = _Authed();
-      a.adapter.response = ResponseBody.fromString(
-        jsonEncode({}),
-        200,
-        headers: {
-          Headers.contentTypeHeader: ['application/json'],
-        },
-      );
-      final repo = UpdateRepository(client: a.client, downloadDio: Dio());
+    test('в ответе resolve нет href → Failure(ParseError)', () async {
+      final adapter = _DiskMockAdapter();
+      adapter.resolveJson = jsonEncode({'method': 'GET'}); // без href
+      final repo = _repo(adapter);
 
-      await repo.checkForUpdate('hs/inventory/update');
+      final res = await repo.checkForUpdate();
 
-      final req = a.adapter.requests.first;
-      // Склейка: 'http://test-host/erp/' + 'hs/inventory/update'
-      // → 'http://test-host/erp/hs/inventory/update' (ровно один baseUrl).
-      expect(req.path, 'http://test-host/erp/hs/inventory/update');
-      // baseUrl не должен встречаться дважды (регрессия найденного бага).
-      expect('http://test-host/erp/'.allMatches(req.path).length, 1);
+      expect(res, isA<Failure>());
+      expect((res as Failure).error, isA<ParseError>());
     });
   });
 
   group('downloadApk', () {
-    test('успех + SHA-256 совпал → Success(файл с содержимым)', () async {
-      final a = _Authed();
-      final bytes = Uint8List.fromList([1, 2, 3, 4, 5]);
-      final expectedHash = sha256.convert(bytes).toString();
-      final downloadAdapter = MockAdapter(recordRequests: true);
-      final repo = UpdateRepository(
-        client: a.client,
-        downloadDio: _dioWith(downloadAdapter),
-      );
-      downloadAdapter.response = ResponseBody.fromBytes(
-        bytes,
-        200,
-        headers: {
-          Headers.contentLengthHeader: ['${bytes.length}'],
-        },
+    test('успех: zip распакован, SHA-256 совпал → Success(apk)', () async {
+      final adapter = _DiskMockAdapter();
+      final apkBytes =
+          Uint8List.fromList(List.generate(1024, (i) => i % 256));
+      final expectedHash = sha256.convert(apkBytes).toString();
+      adapter.downloadBytes = _zipWithApk(apkBytes);
+      final repo = _repo(adapter);
+      final manifest = VersionManifest(
+        versionCode: 5,
+        versionName: '0.5.0',
+        apkPath: 'releases/x.zip',
+        releaseNotes: '',
+        sha256: expectedHash,
+        required: false,
       );
       final tmpDir = await Directory.systemTemp.createTemp('tsd_test_');
 
-      final res = await repo.downloadApk(
-        'https://storage.example/file.apk?sig=abc',
-        sha256: expectedHash,
-        targetDir: tmpDir,
-      );
+      final res = await repo.downloadApk(manifest, targetDir: tmpDir);
 
       expect(res, isA<Success>());
-      final file = (res as Success).value;
+      final file = (res as Success).value as File;
       expect(await file.exists(), isTrue);
-      expect(await file.length(), bytes.length);
+      expect(await file.length(), apkBytes.length);
+      // zip после распаковки удалён.
+      expect(await File('${tmpDir.path}/tsd_update.zip').exists(), isFalse);
       await tmpDir.delete(recursive: true);
     });
 
-    test('скачивание без Basic Auth/cookies/X-Update-Token', () async {
-      final a = _Authed();
-      final bytes = Uint8List.fromList([1, 2, 3]);
-      final expectedHash = sha256.convert(bytes).toString();
-      final downloadAdapter = MockAdapter(recordRequests: true);
-      final repo = UpdateRepository(
-        client: a.client,
-        downloadDio: _dioWith(downloadAdapter),
-      );
-      downloadAdapter.response = ResponseBody.fromBytes(
-        bytes,
-        200,
-        headers: {
-          Headers.contentLengthHeader: ['${bytes.length}'],
-        },
+    test('скачивание без авторизации', () async {
+      final adapter = _DiskMockAdapter(recordRequests: true);
+      final apkBytes = Uint8List.fromList([1, 2, 3, 4]);
+      adapter.downloadBytes = _zipWithApk(apkBytes);
+      final repo = _repo(adapter);
+      final manifest = VersionManifest(
+        versionCode: 5,
+        versionName: '0.5.0',
+        apkPath: 'releases/x.zip',
+        releaseNotes: '',
+        sha256: sha256.convert(apkBytes).toString(),
+        required: false,
       );
       final tmpDir = await Directory.systemTemp.createTemp('tsd_test_');
 
-      await repo.downloadApk(
-        'https://storage.example/file.apk?sig=abc',
-        sha256: expectedHash,
-        targetDir: tmpDir,
-      );
+      await repo.downloadApk(manifest, targetDir: tmpDir);
 
-      final req = downloadAdapter.requests.first;
-      // Подписанная ссылка самодостаточна — никаких учётных данных.
-      expect(req.headers['Authorization'], isNull);
-      expect(req.headers['Cookie'], isNull);
-      expect(req.headers['X-Update-Token'], isNull);
+      for (final req in adapter.requests) {
+        expect(req.headers['Authorization'], isNull);
+      }
       await tmpDir.delete(recursive: true);
     });
 
-    test(
-      'SHA-256 несовпадение → Failure(IntegrityError) и файл удалён',
-      () async {
-        final a = _Authed();
-        final bytes = Uint8List.fromList([1, 2, 3, 4, 5]);
-        final downloadAdapter = MockAdapter(recordRequests: true);
-        final repo = UpdateRepository(
-          client: a.client,
-          downloadDio: _dioWith(downloadAdapter),
-        );
-        downloadAdapter.response = ResponseBody.fromBytes(
-          bytes,
-          200,
-          headers: {
-            Headers.contentLengthHeader: ['${bytes.length}'],
-          },
-        );
-        final tmpDir = await Directory.systemTemp.createTemp('tsd_test_');
+    test('SHA-256 несовпадение → Failure(IntegrityError), apk удалён', () async {
+      final adapter = _DiskMockAdapter();
+      final apkBytes = Uint8List.fromList([1, 2, 3, 4, 5]);
+      adapter.downloadBytes = _zipWithApk(apkBytes);
+      final repo = _repo(adapter);
+      final manifest = VersionManifest(
+        versionCode: 5,
+        versionName: '0.5.0',
+        apkPath: 'releases/x.zip',
+        releaseNotes: '',
+        sha256: '0' * 64, // заведомо неверный хеш
+        required: false,
+      );
+      final tmpDir = await Directory.systemTemp.createTemp('tsd_test_');
 
-        final res = await repo.downloadApk(
-          'https://storage.example/file.apk?sig=abc',
-          sha256: '0' * 64, // заведомо неверный хеш
-          targetDir: tmpDir,
-        );
+      final res = await repo.downloadApk(manifest, targetDir: tmpDir);
 
-        expect(res, isA<Failure>());
-        expect((res as Failure).error, isA<IntegrityError>());
-        final file = File('${tmpDir.path}/tsd_update.apk');
-        expect(await file.exists(), isFalse);
-        await tmpDir.delete(recursive: true);
-      },
-    );
+      expect(res, isA<Failure>());
+      expect((res as Failure).error, isA<IntegrityError>());
+      expect(await File('${tmpDir.path}/tsd_update.apk').exists(), isFalse);
+      await tmpDir.delete(recursive: true);
+    });
 
     test('пустой sha256 → Failure без скачивания', () async {
-      final a = _Authed();
-      final downloadAdapter = MockAdapter(recordRequests: true);
-      final repo = UpdateRepository(
-        client: a.client,
-        downloadDio: _dioWith(downloadAdapter),
+      final adapter = _DiskMockAdapter();
+      final repo = _repo(adapter);
+      final manifest = VersionManifest(
+        versionCode: 5,
+        versionName: '0.5.0',
+        apkPath: 'releases/x.zip',
+        releaseNotes: '',
+        sha256: '',
+        required: false,
       );
       final tmpDir = await Directory.systemTemp.createTemp('tsd_test_');
 
-      final res = await repo.downloadApk(
-        'https://storage.example/file.apk?sig=abc',
-        sha256: '',
-        targetDir: tmpDir,
-      );
+      final res = await repo.downloadApk(manifest, targetDir: tmpDir);
 
       expect(res, isA<Failure>());
       expect((res as Failure).error, isA<ParseError>());
-      expect(downloadAdapter.requests, isEmpty);
+      // Ни resolve, ни скачивания не было.
+      expect(adapter.requests, isEmpty);
       await tmpDir.delete(recursive: true);
     });
 
-    test('пустой apkUrl → Failure без скачивания', () async {
-      final a = _Authed();
-      final downloadAdapter = MockAdapter(recordRequests: true);
-      final repo = UpdateRepository(
-        client: a.client,
-        downloadDio: _dioWith(downloadAdapter),
+    test('пустой apkPath → Failure без скачивания', () async {
+      final adapter = _DiskMockAdapter();
+      final repo = _repo(adapter);
+      final manifest = VersionManifest(
+        versionCode: 5,
+        versionName: '0.5.0',
+        apkPath: '',
+        releaseNotes: '',
+        sha256: 'abc',
+        required: false,
       );
       final tmpDir = await Directory.systemTemp.createTemp('tsd_test_');
 
-      final res = await repo.downloadApk('', sha256: 'abc', targetDir: tmpDir);
+      final res = await repo.downloadApk(manifest, targetDir: tmpDir);
 
       expect(res, isA<Failure>());
-      expect(downloadAdapter.requests, isEmpty);
+      expect(adapter.requests, isEmpty);
+      await tmpDir.delete(recursive: true);
+    });
+
+    test('zip без .apk → Failure (распаковка не удалась)', () async {
+      final adapter = _DiskMockAdapter();
+      // Архив с файлом, не являющимся APK.
+      final archive = Archive()
+        ..addFile(ArchiveFile('readme.txt', 3, [1, 2, 3]));
+      adapter.downloadBytes = ZipEncoder().encode(archive);
+      final repo = _repo(adapter);
+      final manifest = VersionManifest(
+        versionCode: 5,
+        versionName: '0.5.0',
+        apkPath: 'releases/x.zip',
+        releaseNotes: '',
+        sha256: 'abc',
+        required: false,
+      );
+      final tmpDir = await Directory.systemTemp.createTemp('tsd_test_');
+
+      final res = await repo.downloadApk(manifest, targetDir: tmpDir);
+
+      expect(res, isA<Failure>());
       await tmpDir.delete(recursive: true);
     });
 
     test('сеть недоступна при скачивании → Failure(NetworkError)', () async {
-      final a = _Authed();
-      final downloadAdapter = MockAdapter();
-      final repo = UpdateRepository(
-        client: a.client,
-        downloadDio: _dioWith(downloadAdapter),
-      );
-      downloadAdapter.error = DioException(
+      final adapter = _DiskMockAdapter();
+      adapter.downloadError = DioException(
         requestOptions: RequestOptions(path: ''),
         type: DioExceptionType.connectionError,
       );
+      final repo = _repo(adapter);
+      final manifest = VersionManifest(
+        versionCode: 5,
+        versionName: '0.5.0',
+        apkPath: 'releases/x.zip',
+        releaseNotes: '',
+        sha256: 'abc',
+        required: false,
+      );
       final tmpDir = await Directory.systemTemp.createTemp('tsd_test_');
 
-      final res = await repo.downloadApk(
-        'https://storage.example/file.apk?sig=abc',
-        sha256: 'abc',
-        targetDir: tmpDir,
-      );
+      final res = await repo.downloadApk(manifest, targetDir: tmpDir);
 
       expect(res, isA<Failure>());
       expect((res as Failure).error, isA<NetworkError>());
-      await tmpDir.delete(recursive: true);
-    });
-
-    test('истёкшая подписанная ссылка (403) → Failure', () async {
-      final a = _Authed();
-      final downloadAdapter = MockAdapter();
-      final repo = UpdateRepository(
-        client: a.client,
-        downloadDio: _dioWith(downloadAdapter),
-      );
-      downloadAdapter.error = DioException(
-        requestOptions: RequestOptions(path: ''),
-        response: Response(
-          requestOptions: RequestOptions(path: ''),
-          statusCode: 403,
-        ),
-        type: DioExceptionType.badResponse,
-      );
-      final tmpDir = await Directory.systemTemp.createTemp('tsd_test_');
-
-      final res = await repo.downloadApk(
-        'https://storage.example/file.apk?sig=expired',
-        sha256: 'abc',
-        targetDir: tmpDir,
-      );
-
-      expect(res, isA<Failure>());
       await tmpDir.delete(recursive: true);
     });
   });
