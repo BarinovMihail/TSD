@@ -142,6 +142,35 @@ void main() {
     });
   });
 
+  group('addNewLine — добавление позиции в документ', () {
+    test('POST /newStr с документом, номенклатурой и характеристикой', () async {
+      when(
+        () => client.postJson<dynamic>(any(), body: any(named: 'body')),
+      ).thenAnswer((_) async => _okResponse<dynamic>());
+      final repo = InventoryRepository(client: client, db: db);
+
+      final result = await repo.addNewLine(
+        'АЕ-1',
+        'Клавиатура',
+        'Белая',
+      );
+
+      expect(result, isA<Success<void>>());
+      final captured = verify(
+        () => client.postJson<dynamic>(
+          captureAny(),
+          body: captureAny(named: 'body'),
+        ),
+      ).captured;
+      expect(captured[0], 'hs/inventory/newStr');
+      expect(captured[1], {
+        'НомерДокумента': 'АЕ-1',
+        'Номенклатура': 'Клавиатура',
+        'Характеристика': 'Белая',
+      });
+    });
+  });
+
   group('getNomenclatures — полный список номенклатуры', () {
     test('GET /nomen, trim, дедупликация и сортировка', () async {
       when(() => client.getJson<dynamic>(any())).thenAnswer(

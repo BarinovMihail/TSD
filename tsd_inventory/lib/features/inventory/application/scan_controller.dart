@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../core/feedback/feedback_service.dart';
+import '../../../core/network/api_error.dart';
 import '../../../core/result/result.dart';
 import '../../../core/storage/app_database.dart';
 import '../data/inventory_repository.dart';
+import '../domain/barcode_assignment.dart';
 import '../domain/barcode_matcher.dart';
 import '../domain/doc_table_row.dart';
 
@@ -127,6 +129,78 @@ class ScanController extends ChangeNotifier {
     );
     notifyListeners();
     return Found(updated);
+  }
+
+  /// Обработать позицию, найденную в регистре сведений по штрихкоду.
+  /// Если соответствующая строка уже есть в документе — отмечает её как
+  /// отсканированную. Если строки нет — возвращает [NotFoundInDocument], чтобы
+  /// интерфейс предложил добавить её через /newStr.
+  Future<ScanOutcome> onRegisteredBarcode(
+    String code,
+    BarcodeAssignment assignment,
+  ) async {
+    final match = _matcher.matchByNomenclatureCharacteristic(
+      assignment.nomenclature,
+      assignment.characteristic,
+      rows,
+    );
+    if (match.isNone) {
+      return NotFoundInDocument(code.trim());
+    }
+    if (match.isAmbiguous) {
+      await _feedback.attention();
+      return Ambiguous(match.exact);
+    }
+    return applyChoice(match.exact.single);
+  }
+
+  /// Добавить найденную в регистре позицию в документ через /newStr,
+  /// перечитать документ и поставить добавленной строке факт +1.
+  ///
+  /// Если такая пара уже присутствует в документе, новая строка не создаётся:
+  /// существующая строка просто отмечается как отсканированная.
+  Future<Result<void>> addMissingLine(BarcodeAssignment assignment) async {
+    final current = _matcher.matchByNomenclatureCharacteristic(
+      assignment.nomenclature,
+      assignment.characteristic,
+      rows,
+    );
+    if (current.isUnique) {
+      await applyChoice(current.exact.single);
+      return const Success(null);
+    }
+    if (current.isAmbiguous) {
+      return const Failure(
+        ParseError('В документе найдено несколько одинаковых позиций'),
+      );
+    }
+
+    final addResult = await _repo.addNewLine(
+      docCode,
+      assignment.nomenclature,
+      assignment.characteristic,
+    );
+    if (addResult is Failure<void>) return addResult;
+
+    final tableResult = await _repo.getTable(docCode);
+    if (tableResult is Failure<List<DocTableRow>>) {
+      return Failure(tableResult.error);
+    }
+    replaceRows((tableResult as Success<List<DocTableRow>>).value);
+    await hydrateFromDb();
+
+    final added = _matcher.matchByNomenclatureCharacteristic(
+      assignment.nomenclature,
+      assignment.characteristic,
+      rows,
+    );
+    if (added.isNone) {
+      return const Failure(
+        ParseError('Новая строка не найдена после добавления'),
+      );
+    }
+    await applyChoice(added.exact.first);
+    return const Success(null);
   }
 
   void _incrementActual(DocTableRow row) {

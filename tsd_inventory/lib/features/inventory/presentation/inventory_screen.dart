@@ -5,11 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/presentation/confirm_dialog.dart';
+import '../../../core/result/result.dart';
 import '../../../core/scanner/keyboard_wedge_scanner.dart';
 import '../../../l10n/app_strings.dart';
 import '../../docs/application/completed_docs_provider.dart';
 import '../application/inventory_screen_controller.dart';
 import '../application/scan_controller.dart';
+import '../domain/barcode_assignment.dart';
 import '../domain/doc_table_row.dart';
 import 'barcode_dialog.dart';
 import 'row_card.dart';
@@ -76,25 +78,146 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     if (!mounted) return;
     switch (outcome) {
       case Found():
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${AppStrings.scanSuccess}: ${outcome.row.nomenclature}',
-            ),
-            backgroundColor: Theme.of(context).colorScheme.secondary,
-            duration: const Duration(milliseconds: 800),
-          ),
-        );
+        _showScanSuccess(outcome.row);
       case NotFoundInDocument():
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        await _showUnknownBarcode(outcome.code);
+        await _resolveNotFoundBarcode(outcome.code);
       case Ambiguous():
         _showAmbiguous(outcome.candidates);
       case ScanIgnored():
         // Пустое после trim — игнорируем без反馈.
         break;
     }
+  }
+
+  void _showScanSuccess(DocTableRow row) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${AppStrings.scanSuccess}: ${row.nomenclature}'),
+        backgroundColor: Theme.of(context).colorScheme.secondary,
+        duration: const Duration(milliseconds: 800),
+      ),
+    );
+  }
+
+  Future<void> _resolveNotFoundBarcode(String code) async {
+    final ctrl = ref.read(
+      inventoryScreenControllerProvider(widget.docCode),
+    );
+    final lookup = await ctrl.repo.getBarcodeAssignment(code);
+    if (!mounted) return;
+    if (lookup is Failure<BarcodeAssignment?>) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(AppStrings.barcodeLookupFailed),
+          action: SnackBarAction(
+            label: AppStrings.retry,
+            onPressed: () => _onCode(code),
+          ),
+        ),
+      );
+      return;
+    }
+
+    final assignment = (lookup as Success<BarcodeAssignment?>).value;
+    if (assignment == null) {
+      await _showUnknownBarcode(code);
+      return;
+    }
+
+    final scan = _scan;
+    if (scan == null) return;
+    final outcome = await scan.onRegisteredBarcode(code, assignment);
+    if (!mounted) return;
+    switch (outcome) {
+      case Found():
+        _showScanSuccess(outcome.row);
+      case NotFoundInDocument():
+        await _showAddToDocument(code, assignment);
+      case Ambiguous():
+        _showAmbiguous(outcome.candidates);
+      case ScanIgnored():
+        break;
+    }
+  }
+
+  Future<void> _showAddToDocument(
+    String code,
+    BarcodeAssignment assignment,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text(AppStrings.addPositionToDocumentTitle),
+        content: Text(
+          AppStrings.addPositionToDocumentMessage(
+            barcode: code,
+            nomenclature: assignment.nomenclature,
+            characteristic: assignment.characteristic,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text(AppStrings.cancel),
+          ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text(AppStrings.addToDocument),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    await _addMissingLine(assignment);
+  }
+
+  Future<void> _addMissingLine(BarcodeAssignment assignment) async {
+    final scan = _scan;
+    if (scan == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showMaterialBanner(
+      MaterialBanner(
+        content: const Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 12),
+            Text(AppStrings.addingToDocument),
+          ],
+        ),
+        actions: const [SizedBox.shrink()],
+      ),
+    );
+    final result = await scan.addMissingLine(assignment);
+    if (!mounted) return;
+    messenger.hideCurrentMaterialBanner();
+    result.maybeWhen(
+      onValue: (_) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text(AppStrings.positionAddedToDocument),
+            backgroundColor: Theme.of(context).colorScheme.secondary,
+          ),
+        );
+      },
+      orElse: (_) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text(AppStrings.addToDocumentFailed),
+            action: SnackBarAction(
+              label: AppStrings.retry,
+              onPressed: () => _addMissingLine(assignment),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _showUnknownBarcode(String code) async {
@@ -106,26 +229,14 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
           title: const Text(AppStrings.unknownBarcodeTitle),
           content: Text(AppStrings.unknownBarcodeMessage(normalized)),
           actions: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(56),
-                  ),
-                  onPressed: () => Navigator.of(dialogContext).pop(true),
-                  child: const Text(
-                    AppStrings.createNomenclatureFromBarcode,
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(false),
-                  child: const Text(AppStrings.cancel),
-                ),
-              ],
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text(AppStrings.cancel),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.add),
+              label: const Text(AppStrings.createNomenclatureFromBarcode),
             ),
           ],
         ),
@@ -182,9 +293,10 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       final value = await showDialog<String>(
         context: context,
         barrierDismissible: false,
-        builder: (context) => _BarcodeCaptureDialog(
+        builder: (context) => BarcodeCaptureDialog(
           row: row,
           codeFuture: capture.future,
+          scanner: _scanner,
         ),
       );
       final normalized = value?.trim();
@@ -497,65 +609,86 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   }
 }
 
-class _BarcodeCaptureDialog extends StatefulWidget {
-  const _BarcodeCaptureDialog({required this.row, required this.codeFuture});
+class BarcodeCaptureDialog extends StatefulWidget {
+  const BarcodeCaptureDialog({
+    required this.row,
+    required this.codeFuture,
+    required this.scanner,
+  });
 
   final DocTableRow row;
   final Future<String> codeFuture;
+  final KeyboardWedgeScanner scanner;
 
   @override
-  State<_BarcodeCaptureDialog> createState() => _BarcodeCaptureDialogState();
+  State<BarcodeCaptureDialog> createState() => _BarcodeCaptureDialogState();
 }
 
-class _BarcodeCaptureDialogState extends State<_BarcodeCaptureDialog> {
+class _BarcodeCaptureDialogState extends State<BarcodeCaptureDialog> {
+  final _focusNode = FocusNode(debugLabel: 'barcode-capture');
+
   @override
   void initState() {
     super.initState();
     widget.codeFuture.then((code) {
       if (mounted) Navigator.of(context).pop(code);
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text(AppStrings.scanBarcodeTitle),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            widget.row.nomenclature,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-          ),
-          if (widget.row.characteristic.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(widget.row.characteristic),
+    return Focus(
+      focusNode: _focusNode,
+      autofocus: true,
+      onKeyEvent: widget.scanner.handleKeyEvent,
+      child: AlertDialog(
+        title: const Text(AppStrings.scanBarcodeTitle),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.row.nomenclature,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
             ),
-          const SizedBox(height: 16),
-          const Row(
-            children: [
-              SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2),
+            if (widget.row.characteristic.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(widget.row.characteristic),
               ),
-              SizedBox(width: 12),
-              Expanded(child: Text(AppStrings.scanBarcodePrompt)),
-            ],
+            const SizedBox(height: 16),
+            const Row(
+              children: [
+                SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 12),
+                Expanded(child: Text(AppStrings.scanBarcodePrompt)),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(56),
+            ),
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text(AppStrings.cancel),
           ),
         ],
       ),
-      actions: [
-        OutlinedButton(
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(56),
-          ),
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text(AppStrings.cancel),
-        ),
-      ],
     );
   }
 }

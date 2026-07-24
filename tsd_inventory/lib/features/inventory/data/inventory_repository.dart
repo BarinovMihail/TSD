@@ -84,6 +84,30 @@ class InventoryRepository {
     }
   }
 
+  /// Добавить номенклатурную позицию в табличную часть документа.
+  /// POST /hs/inventory/newStr.
+  Future<Result<void>> addNewLine(
+    String docCode,
+    String nomenclature,
+    String characteristic,
+  ) async {
+    const path = 'hs/inventory/newStr';
+    final body = {
+      'НомерДокумента': docCode,
+      'Номенклатура': nomenclature,
+      'Характеристика': characteristic,
+    };
+    try {
+      await _client.postJson<dynamic>(path, body: body);
+      return const Success(null);
+    } on DioException catch (e) {
+      return Failure(ApiError.fromDio(e));
+    } catch (e) {
+      _log.warning('Ошибка добавления строки документа: $e');
+      return const Failure(NetworkError());
+    }
+  }
+
   /// Полный список номенклатурных позиций.
   /// GET /hs/inventory/nomen.
   ///

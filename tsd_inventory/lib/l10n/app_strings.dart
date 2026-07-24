@@ -96,9 +96,25 @@ abstract final class AppStrings {
   static const barcodeNotFoundInDoc = 'Штрихкод не найден в текущем документе';
   static const unknownBarcodeTitle = 'Штрихкод не найден';
   static String unknownBarcodeMessage(String barcode) =>
-      'Штрихкод $barcode не найден в текущем документе.';
-  static const createNomenclatureFromBarcode =
-      'Создать номенклатуру с этим штрихкодом';
+      'Штрихкод $barcode не зарегистрирован в 1С.';
+  static const createNomenclatureFromBarcode = 'Создать';
+  static const barcodeLookupFailed =
+      'Не удалось проверить штрихкод в регистре';
+  static const addPositionToDocumentTitle = 'Добавить позицию в документ?';
+  static String addPositionToDocumentMessage({
+    required String barcode,
+    required String nomenclature,
+    required String characteristic,
+  }) =>
+      '$nomenclature'
+      '${characteristic.isEmpty ? '' : '\n$characteristic'}'
+      '\n\nШтрихкод: $barcode';
+  static const addToDocument = 'Добавить';
+  static const addingToDocument = 'Добавление позиции…';
+  static const positionAddedToDocument = 'Позиция добавлена в документ';
+  static const addToDocumentFailed = 'Не удалось добавить позицию в документ';
+  static const barcodeAndPositionAdded =
+      'Штрихкод привязан, позиция добавлена в документ';
   static const selectNomenclatureTitle = 'Выбор номенклатуры';
   static const scannedBarcodeLabel = 'Отсканированный штрихкод';
   static const nomenclatureLabel = 'Номенклатура';

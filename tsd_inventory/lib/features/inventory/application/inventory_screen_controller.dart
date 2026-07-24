@@ -183,10 +183,9 @@ class InventoryScreenController extends ChangeNotifier {
     );
   }
 
-  /// Привязать неизвестный в текущем документе штрихкод к позиции из полного
-  /// каталога номенклатуры. После сетевой ошибки проверяем результат напрямую
-  /// через /barcode/{ШК}, потому что выбранной позиции может не быть в
-  /// открытом документе и обычная проверка по его строкам здесь недостаточна.
+  /// Привязать неизвестный штрихкод к позиции из каталога, затем добавить
+  /// выбранную позицию в открытый документ через /newStr и поставить факт +1.
+  /// После сетевой ошибки записи ШК результат проверяется через /barcode/{ШК}.
   Future<({AddBarcodeOutcome outcome, ApiError? error})>
   assignUnknownBarcodeAndReload({
     required String nomenclature,
@@ -201,15 +200,19 @@ class InventoryScreenController extends ChangeNotifier {
     );
 
     if (res is Success) {
-      await reload();
-      return (outcome: AddBarcodeOutcome.done, error: null);
+      return _addRegisteredPositionToDocument(
+        BarcodeAssignment(
+          nomenclature: nomenclature,
+          characteristic: characteristic,
+        ),
+        successOutcome: AddBarcodeOutcome.done,
+      );
     }
 
     final err = (res as Failure<void>).error;
-    if (err is! NetworkError) {
-      return (outcome: AddBarcodeOutcome.failed, error: err);
-    }
-
+    // Если предыдущая попытка успела записать ШК, но оборвалась на /newStr,
+    // повторный POST /newBarcode может вернуть «уже существует». Проверяем
+    // фактическую привязку и продолжаем с добавления строки документа.
     final lookup = await repo.getBarcodeAssignment(normalized);
     if (lookup is Success<BarcodeAssignment?> &&
         lookup.value?.matches(
@@ -217,13 +220,35 @@ class InventoryScreenController extends ChangeNotifier {
               characteristic: characteristic,
             ) ==
             true) {
-      await reload();
-      return (
-        outcome: AddBarcodeOutcome.verifiedAfterTimeout,
-        error: null,
+      return _addRegisteredPositionToDocument(
+        lookup.value!,
+        successOutcome: AddBarcodeOutcome.verifiedAfterTimeout,
       );
     }
+    if (err is! NetworkError) {
+      return (outcome: AddBarcodeOutcome.failed, error: err);
+    }
     return (outcome: AddBarcodeOutcome.inconclusive, error: null);
+  }
+
+  Future<({AddBarcodeOutcome outcome, ApiError? error})>
+  _addRegisteredPositionToDocument(
+    BarcodeAssignment assignment, {
+    required AddBarcodeOutcome successOutcome,
+  }) async {
+    final scan = this.scan;
+    if (scan == null) {
+      return (
+        outcome: AddBarcodeOutcome.failed,
+        error: const ParseError('Документ не загружен'),
+      );
+    }
+    final result = await scan.addMissingLine(assignment);
+    if (result is Failure<void>) {
+      return (outcome: AddBarcodeOutcome.failed, error: result.error);
+    }
+    notifyListeners();
+    return (outcome: successOutcome, error: null);
   }
 
   /// Удалить штрихкод в 1С и перечитать документ.

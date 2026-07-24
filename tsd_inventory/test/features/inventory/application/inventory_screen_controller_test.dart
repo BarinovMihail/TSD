@@ -18,14 +18,17 @@ class _MockDb extends Mock implements AppDatabase {}
 class _MockFeedback extends Mock implements FeedbackService {}
 
 DocTableRow _row({
+  int lineNumber = 1,
+  String nomenclature = 'Монитор',
+  String characteristic = 'Black',
   List<String> barcodes = const [],
   int qtyActual = 0,
 }) => DocTableRow(
-  lineNumber: 1,
+  lineNumber: lineNumber,
   inventoryNumber: '',
-  nomenclature: 'Монитор',
+  nomenclature: nomenclature,
   nomenclatureCode: '00-00000123',
-  characteristic: 'Black',
+  characteristic: characteristic,
   series: '',
   seriesStatus: '0',
   fio: '',
@@ -329,13 +332,24 @@ void main() {
   });
 
   group('assignUnknownBarcodeAndReload', () {
-    test('успех привязки перечитывает открытый документ', () async {
+    test('успех привязки добавляет позицию в открытый документ', () async {
       when(
         () => repo.addScannedBarcode(any(), any(), any()),
       ).thenAnswer((_) async => const Success(null));
       when(
+        () => repo.addNewLine(any(), any(), any()),
+      ).thenAnswer((_) async => const Success(null));
+      when(
         () => repo.getTable(any()),
-      ).thenAnswer((_) async => const Success([]));
+      ).thenAnswer(
+        (_) async => Success([
+          _row(
+            lineNumber: 2,
+            nomenclature: 'Клавиатура',
+            characteristic: '',
+          ),
+        ]),
+      );
       final ctrl = _controller(repo, db, feedback, _row());
 
       final result = await ctrl.assignUnknownBarcodeAndReload(
@@ -348,7 +362,11 @@ void main() {
       verify(
         () => repo.addScannedBarcode('Клавиатура', '', '123'),
       ).called(1);
+      verify(
+        () => repo.addNewLine('АЕ-1', 'Клавиатура', ''),
+      ).called(1);
       verify(() => repo.getTable('АЕ-1')).called(1);
+      expect(ctrl.scan!.rows.single.qtyActual, 1);
     });
 
     test('после таймаута проверяет глобальную привязку по штрихкоду', () async {
@@ -364,8 +382,19 @@ void main() {
         ),
       );
       when(
+        () => repo.addNewLine(any(), any(), any()),
+      ).thenAnswer((_) async => const Success(null));
+      when(
         () => repo.getTable(any()),
-      ).thenAnswer((_) async => const Success([]));
+      ).thenAnswer(
+        (_) async => Success([
+          _row(
+            lineNumber: 2,
+            nomenclature: 'Клавиатура',
+            characteristic: 'Белая',
+          ),
+        ]),
+      );
       final ctrl = _controller(repo, db, feedback, _row());
 
       final result = await ctrl.assignUnknownBarcodeAndReload(
@@ -401,6 +430,52 @@ void main() {
       expect(result.outcome, AddBarcodeOutcome.inconclusive);
       verifyNever(() => repo.getTable(any()));
     });
+
+    test(
+      'после ошибки повторной записи продолжает добавление уже созданного ШК',
+      () async {
+        when(
+          () => repo.addScannedBarcode(any(), any(), any()),
+        ).thenAnswer(
+          (_) async => const Failure(ServerError(code: 409)),
+        );
+        when(() => repo.getBarcodeAssignment('123')).thenAnswer(
+          (_) async => const Success(
+            BarcodeAssignment(
+              nomenclature: 'Клавиатура',
+              characteristic: 'Белая',
+            ),
+          ),
+        );
+        when(
+          () => repo.addNewLine(any(), any(), any()),
+        ).thenAnswer((_) async => const Success(null));
+        when(
+          () => repo.getTable(any()),
+        ).thenAnswer(
+          (_) async => Success([
+            _row(
+              lineNumber: 2,
+              nomenclature: 'Клавиатура',
+              characteristic: 'Белая',
+            ),
+          ]),
+        );
+        final ctrl = _controller(repo, db, feedback, _row());
+
+        final result = await ctrl.assignUnknownBarcodeAndReload(
+          nomenclature: 'Клавиатура',
+          characteristic: 'Белая',
+          barcode: '123',
+        );
+
+        expect(result.outcome, AddBarcodeOutcome.verifiedAfterTimeout);
+        verify(
+          () => repo.addNewLine('АЕ-1', 'Клавиатура', 'Белая'),
+        ).called(1);
+        expect(ctrl.scan!.rows.single.qtyActual, 1);
+      },
+    );
   });
 
   group('deleteBarcodeAndReload', () {

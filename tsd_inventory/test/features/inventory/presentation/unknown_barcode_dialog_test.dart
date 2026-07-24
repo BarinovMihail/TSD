@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:tsd_inventory/core/feedback/feedback_service.dart';
+import 'package:tsd_inventory/core/network/api_error.dart';
 import 'package:tsd_inventory/core/result/result.dart';
 import 'package:tsd_inventory/core/storage/app_database.dart';
 import 'package:tsd_inventory/features/inventory/application/inventory_screen_controller.dart';
 import 'package:tsd_inventory/features/inventory/application/scan_controller.dart';
 import 'package:tsd_inventory/features/inventory/data/inventory_repository.dart';
+import 'package:tsd_inventory/features/inventory/domain/barcode_assignment.dart';
 import 'package:tsd_inventory/features/inventory/domain/barcode_matcher.dart';
 import 'package:tsd_inventory/features/inventory/domain/doc_table_row.dart';
 import 'package:tsd_inventory/features/inventory/presentation/unknown_barcode_dialog.dart';
@@ -18,12 +20,16 @@ class _MockDb extends Mock implements AppDatabase {}
 
 class _MockFeedback extends Mock implements FeedbackService {}
 
-DocTableRow _row() => DocTableRow(
-  lineNumber: 1,
+DocTableRow _row({
+  int lineNumber = 1,
+  String nomenclature = 'Монитор',
+  String characteristic = '',
+}) => DocTableRow(
+  lineNumber: lineNumber,
   inventoryNumber: '',
-  nomenclature: 'Монитор',
+  nomenclature: nomenclature,
   nomenclatureCode: '001',
-  characteristic: '',
+  characteristic: characteristic,
   series: '',
   seriesStatus: '0',
   fio: '',
@@ -66,6 +72,7 @@ void main() {
     db = _MockDb();
     feedback = _MockFeedback();
     registerFallbackValue('');
+    when(() => feedback.success()).thenAnswer((_) async {});
     when(
       () => db.getScanProgress(any()),
     ).thenAnswer((_) async => <int, ScanProgressData>{});
@@ -76,8 +83,19 @@ void main() {
       () => repo.addScannedBarcode(any(), any(), any()),
     ).thenAnswer((_) async => const Success(null));
     when(
+      () => repo.addNewLine(any(), any(), any()),
+    ).thenAnswer((_) async => const Success(null));
+    when(
       () => repo.getTable(any()),
-    ).thenAnswer((_) async => const Success([]));
+    ).thenAnswer(
+      (_) async => Success([
+        _row(
+          lineNumber: 2,
+          nomenclature: 'Клавиатура',
+          characteristic: '',
+        ),
+      ]),
+    );
   });
 
   Widget wrap(InventoryScreenController controller) => MaterialApp(
@@ -95,6 +113,17 @@ void main() {
     when(
       () => repo.getCharacteristics('Клавиатура'),
     ).thenAnswer((_) async => const Success(['Белая', 'Чёрная']));
+    when(
+      () => repo.getTable(any()),
+    ).thenAnswer(
+      (_) async => Success([
+        _row(
+          lineNumber: 2,
+          nomenclature: 'Клавиатура',
+          characteristic: 'Белая',
+        ),
+      ]),
+    );
     final controller = _controller(repo, db, feedback);
 
     await tester.pumpWidget(wrap(controller));
@@ -116,6 +145,9 @@ void main() {
 
     verify(
       () => repo.addScannedBarcode('Клавиатура', 'Белая', '460123'),
+    ).called(1);
+    verify(
+      () => repo.addNewLine('АЕ-1', 'Клавиатура', 'Белая'),
     ).called(1);
   });
 
@@ -142,5 +174,43 @@ void main() {
     verify(
       () => repo.addScannedBarcode('Клавиатура', '', '460123'),
     ).called(1);
+    verify(
+      () => repo.addNewLine('АЕ-1', 'Клавиатура', ''),
+    ).called(1);
   });
+
+  testWidgets(
+    'повторная попытка завершает /newStr, если ШК уже успел записаться',
+    (tester) async {
+      when(
+        () => repo.getNomenclatures(),
+      ).thenAnswer((_) async => const Success(['Клавиатура']));
+      when(
+        () => repo.getCharacteristics('Клавиатура'),
+      ).thenAnswer((_) async => const Success([]));
+      when(() => repo.getBarcodeAssignment('460123')).thenAnswer(
+        (_) async => const Success(
+          BarcodeAssignment(
+            nomenclature: 'Клавиатура',
+            characteristic: '',
+          ),
+        ),
+      );
+      when(
+        () => repo.addScannedBarcode(any(), any(), any()),
+      ).thenAnswer((_) async => const Failure(ServerError(code: 500)));
+      final controller = _controller(repo, db, feedback);
+
+      await tester.pumpWidget(wrap(controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Клавиатура'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(AppStrings.assignBarcode));
+      await tester.pumpAndSettle();
+
+      verify(
+        () => repo.addNewLine('АЕ-1', 'Клавиатура', ''),
+      ).called(1);
+    },
+  );
 }

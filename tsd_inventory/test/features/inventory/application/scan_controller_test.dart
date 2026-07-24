@@ -6,6 +6,7 @@ import 'package:tsd_inventory/core/result/result.dart';
 import 'package:tsd_inventory/core/storage/app_database.dart';
 import 'package:tsd_inventory/features/inventory/application/scan_controller.dart';
 import 'package:tsd_inventory/features/inventory/data/inventory_repository.dart';
+import 'package:tsd_inventory/features/inventory/domain/barcode_assignment.dart';
 import 'package:tsd_inventory/features/inventory/domain/barcode_matcher.dart';
 import 'package:tsd_inventory/features/inventory/domain/doc_table_row.dart';
 
@@ -17,14 +18,16 @@ class _MockFeedback extends Mock implements FeedbackService {}
 
 DocTableRow _row(
   int line, {
+  String? nomenclature,
+  String characteristic = '',
   List<String> barcodes = const [],
   int qtyActual = 0,
 }) => DocTableRow(
   lineNumber: line,
   inventoryNumber: '',
-  nomenclature: 'N$line',
+  nomenclature: nomenclature ?? 'N$line',
   nomenclatureCode: 'k$line',
-  characteristic: '',
+  characteristic: characteristic,
   series: '',
   seriesStatus: '0',
   fio: '',
@@ -270,6 +273,82 @@ void main() {
       _row(1, barcodes: ['444']),
     ]);
     expect((await controller.onScanned('444')), isA<Found>());
+  });
+
+  group('позиция из регистра', () {
+    const assignment = BarcodeAssignment(
+      nomenclature: 'Клавиатура',
+      characteristic: 'Белая',
+    );
+
+    test('существующая строка получает факт +1', () async {
+      final controller = _controller(
+        repo: repo,
+        db: db,
+        feedback: feedback,
+        rows: [
+          _row(
+            1,
+            nomenclature: 'Клавиатура',
+            characteristic: 'Белая',
+          ),
+        ],
+      );
+
+      final result = await controller.onRegisteredBarcode('123', assignment);
+
+      expect(result, isA<Found>());
+      expect(controller.rows.single.qtyActual, 1);
+    });
+
+    test('отсутствующая строка предлагает добавление в документ', () async {
+      final controller = _controller(
+        repo: repo,
+        db: db,
+        feedback: feedback,
+        rows: [_row(1, nomenclature: 'Монитор')],
+      );
+
+      final result = await controller.onRegisteredBarcode('123', assignment);
+
+      expect(result, isA<NotFoundInDocument>());
+    });
+
+    test(
+      'addMissingLine вызывает /newStr, перечитывает документ и ставит факт',
+      () async {
+        when(
+          () => repo.addNewLine(any(), any(), any()),
+        ).thenAnswer((_) async => const Success(null));
+        when(() => repo.getTable('АЕ-1')).thenAnswer(
+          (_) async => Success([
+            _row(1, nomenclature: 'Монитор'),
+            _row(
+              2,
+              nomenclature: 'Клавиатура',
+              characteristic: 'Белая',
+            ),
+          ]),
+        );
+        final controller = _controller(
+          repo: repo,
+          db: db,
+          feedback: feedback,
+          rows: [_row(1, nomenclature: 'Монитор')],
+        );
+
+        final result = await controller.addMissingLine(assignment);
+
+        expect(result, isA<Success<void>>());
+        verify(
+          () => repo.addNewLine('АЕ-1', 'Клавиатура', 'Белая'),
+        ).called(1);
+        expect(
+          controller.rows.firstWhere((row) => row.lineNumber == 2).qtyActual,
+          1,
+        );
+      },
+    );
   });
 
   group('hydrateFromDb', () {

@@ -2,12 +2,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tsd_inventory/features/inventory/domain/barcode_matcher.dart';
 import 'package:tsd_inventory/features/inventory/domain/doc_table_row.dart';
 
-DocTableRow _row(int line, {List<String> barcodes = const []}) => DocTableRow(
+DocTableRow _row(
+  int line, {
+  String? nomenclature,
+  String characteristic = '',
+  List<String> barcodes = const [],
+}) => DocTableRow(
   lineNumber: line,
   inventoryNumber: '',
-  nomenclature: 'N$line',
+  nomenclature: nomenclature ?? 'N$line',
   nomenclatureCode: 'k$line',
-  characteristic: '',
+  characteristic: characteristic,
   series: '',
   seriesStatus: '0',
   fio: '',
@@ -97,6 +102,42 @@ void main() {
         BarcodeMatcher().matchByBarcode('111', rows).exact.single.lineNumber,
         2,
       );
+    });
+  });
+
+  group('matchByNomenclatureCharacteristic', () {
+    test('сопоставляет позицию из регистра со строкой документа', () {
+      final rows = [
+        _row(1, nomenclature: 'Монитор', characteristic: 'Black'),
+        _row(2, nomenclature: 'Клавиатура', characteristic: 'Белая'),
+      ];
+
+      final result = BarcodeMatcher().matchByNomenclatureCharacteristic(
+        'Клавиатура',
+        'Белая',
+        rows,
+      );
+
+      expect(result.isUnique, true);
+      expect(result.exact.single.lineNumber, 2);
+    });
+
+    test('игнорирует регистр и повторяющиеся пробелы', () {
+      final rows = [
+        _row(
+          1,
+          nomenclature: '  МОНИТОР   24 ',
+          characteristic: ' BLACK ',
+        ),
+      ];
+
+      final result = BarcodeMatcher().matchByNomenclatureCharacteristic(
+        'монитор 24',
+        'black',
+        rows,
+      );
+
+      expect(result.isUnique, true);
     });
   });
 }

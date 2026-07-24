@@ -37,4 +37,31 @@ class BarcodeMatcher {
         .toList();
     return MatchResult(hits);
   }
+
+  /// Сопоставление позиции из регистра сведений со строками документа.
+  /// Название и характеристика сравниваются без учёта регистра и лишних
+  /// пробелов, потому что оба значения приходят из разных HTTP-сервисов 1С.
+  MatchResult matchByNomenclatureCharacteristic(
+    String nomenclature,
+    String characteristic,
+    List<DocTableRow> rows,
+  ) {
+    final normalizedNomenclature = _normalizeText(nomenclature);
+    if (normalizedNomenclature.isEmpty) return MatchResult(const []);
+    final normalizedCharacteristic = _normalizeText(characteristic);
+    final hits = rows
+        .where(
+          (row) =>
+              _normalizeText(row.nomenclature) == normalizedNomenclature &&
+              _normalizeText(row.characteristic) == normalizedCharacteristic,
+        )
+        .toList();
+    return MatchResult(hits);
+  }
+
+  String _normalizeText(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return '';
+    return trimmed.replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+  }
 }

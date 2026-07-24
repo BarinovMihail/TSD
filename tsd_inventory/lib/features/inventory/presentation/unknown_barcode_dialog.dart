@@ -120,10 +120,10 @@ class _UnknownBarcodeDialogState extends State<UnknownBarcodeDialog> {
       nomenclature: nomenclature,
       characteristic: characteristic,
     )) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(AppStrings.barcodeAlreadyAssignedHere)),
-      );
-      return false;
+      // ШК мог успеть записаться на предыдущей попытке, а /newStr — нет.
+      // Разрешаем продолжить: контроллер распознает существующую привязку
+      // и завершит добавление позиции в документ.
+      return true;
     }
 
     return await showDialog<bool>(
@@ -189,7 +189,7 @@ class _UnknownBarcodeDialogState extends State<UnknownBarcodeDialog> {
         messenger.hideCurrentSnackBar();
         messenger.showSnackBar(
           SnackBar(
-            content: const Text(AppStrings.barcodeAddedSuccess),
+            content: const Text(AppStrings.barcodeAndPositionAdded),
             backgroundColor: Theme.of(context).colorScheme.secondary,
           ),
         );
