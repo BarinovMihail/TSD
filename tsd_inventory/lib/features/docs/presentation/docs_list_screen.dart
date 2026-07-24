@@ -172,23 +172,9 @@ class _DocsListScreenState extends ConsumerState<DocsListScreen>
               ),
               data: (docs) {
                 if (docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text(
-                          AppStrings.docsEmpty,
-                          style: TextStyle(fontSize: 20),
-                        ),
-                        const SizedBox(height: 16),
-                        OutlinedButton(
-                          onPressed: () => ref
-                              .read(docsControllerProvider.notifier)
-                              .refresh(),
-                          child: const Text(AppStrings.retry),
-                        ),
-                      ],
-                    ),
+                  return _EmptyDocsView(
+                    onRefresh: () =>
+                        ref.read(docsControllerProvider.notifier).refresh(),
                   );
                 }
                 final visibleDocs = filterAndSortDocs(
@@ -336,6 +322,92 @@ class _DocsListScreenState extends ConsumerState<DocsListScreen>
         ref.invalidate(completedDocsProvider);
       },
       destructiveSecondary: true,
+    );
+  }
+}
+
+class _EmptyDocsView extends StatelessWidget {
+  const _EmptyDocsView({required this.onRefresh});
+
+  final Future<void> Function() onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+                child: Column(
+                  children: [
+                    const Spacer(),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: scheme.primaryContainer,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Icon(
+                          Icons.inventory_2_outlined,
+                          size: 48,
+                          color: scheme.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      AppStrings.docsEmpty,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      AppStrings.docsEmptyHint,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 17,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const Spacer(),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        key: const Key('empty-docs-refresh-button'),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(64),
+                          textStyle: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        onPressed: onRefresh,
+                        icon: const Icon(Icons.refresh, size: 28),
+                        label: const Text(AppStrings.refreshDocs),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

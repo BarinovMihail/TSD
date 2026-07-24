@@ -33,6 +33,8 @@ abstract final class AppStrings {
   // Список документов
   static const docsTitle = 'Документы инвентаризации';
   static const docsEmpty = 'Документов не найдено';
+  static const docsEmptyHint = 'Новые документы появятся здесь';
+  static const refreshDocs = 'Обновить список';
   static const docsLoadError = 'Ошибка загрузки документов';
   static const searchDocument = 'Поиск по номеру документа';
   static const clearSearch = 'Очистить поиск';
