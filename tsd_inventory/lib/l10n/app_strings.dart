@@ -42,7 +42,8 @@ abstract final class AppStrings {
   static const oldestFirst = 'Сначала старые';
   static const docsSearchEmpty = 'Документы не найдены';
   static const docPosted = 'Проведён';
-  static const docDraft = 'Черновик';
+  static const docNotPosted = 'Не проведён';
+  static const docSent = 'Отправлен';
   static const orgLabel = 'Организация';
   static const deptLabel = 'Подразделение';
   static const linesCount = 'строк';

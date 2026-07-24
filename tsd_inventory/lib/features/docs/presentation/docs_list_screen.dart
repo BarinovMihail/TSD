@@ -255,15 +255,13 @@ class _DocsListScreenState extends ConsumerState<DocsListScreen>
                                 itemCount: visibleDocs.length,
                                 itemBuilder: (context, i) {
                                   final doc = visibleDocs[i];
-                                  final completed =
-                                      asyncCompleted.maybeWhen(
-                                        data: (s) => s.contains(doc.number),
-                                        orElse: () => false,
-                                      ) ||
-                                      doc.posted;
+                                  final sent = asyncCompleted.maybeWhen(
+                                    data: (s) => s.contains(doc.number),
+                                    orElse: () => false,
+                                  );
                                   return _DocCard(
                                     doc: doc,
-                                    completed: completed,
+                                    sent: sent,
                                     onTap: () =>
                                         context.go('/docs/${doc.number}'),
                                     onUnmark: () => _confirmUnmark(
@@ -415,12 +413,12 @@ class _EmptyDocsView extends StatelessWidget {
 class _DocCard extends StatelessWidget {
   const _DocCard({
     required this.doc,
-    required this.completed,
+    required this.sent,
     required this.onTap,
     this.onUnmark,
   });
   final DocListItem doc;
-  final bool completed; // документ полностью отправлен в 1С
+  final bool sent; // документ полностью отправлен с этого ТСД
   final VoidCallback onTap;
   // Long-press на отправленном документе → снять пометку. null, если не отправлен.
   final VoidCallback? onUnmark;
@@ -432,15 +430,15 @@ class _DocCard extends StatelessWidget {
     return Card(
       child: InkWell(
         onTap: onTap,
-        onLongPress: completed ? onUnmark : null,
+        onLongPress: sent ? onUnmark : null,
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
             children: [
               // Метка «отправлен» — иконка слева.
               Icon(
-                completed ? Icons.check_circle : Icons.radio_button_unchecked,
-                color: completed ? scheme.secondary : scheme.outline,
+                sent ? Icons.check_circle : Icons.radio_button_unchecked,
+                color: sent ? scheme.secondary : scheme.outline,
                 size: 28,
               ),
               const SizedBox(width: 10),
@@ -448,12 +446,20 @@ class _DocCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      doc.number,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            doc.number,
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _PostedBadge(posted: doc.posted),
+                      ],
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -468,11 +474,11 @@ class _DocCard extends StatelessWidget {
                           style: TextStyle(fontSize: 14, color: scheme.outline),
                         ),
                       ),
-                    if (completed)
+                    if (sent)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                          '✓ Отправлен',
+                          '✓ ${AppStrings.docSent}',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
@@ -481,6 +487,55 @@ class _DocCard extends StatelessWidget {
                         ),
                       ),
                   ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PostedBadge extends StatelessWidget {
+  const _PostedBadge({required this.posted});
+
+  final bool posted;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final label = posted ? AppStrings.docPosted : AppStrings.docNotPosted;
+    final color = posted ? scheme.secondary : scheme.outline;
+
+    return Semantics(
+      label: 'Статус документа: $label',
+      excludeSemantics: true,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: posted
+              ? scheme.secondary.withValues(alpha: 0.12)
+              : scheme.surface,
+          border: Border.all(color: color),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                posted ? Icons.check_circle : Icons.remove_circle_outline,
+                size: 16,
+                color: color,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: color,
                 ),
               ),
             ],
