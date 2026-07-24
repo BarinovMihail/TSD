@@ -84,6 +84,61 @@ class InventoryRepository {
     }
   }
 
+  /// Полный список номенклатурных позиций.
+  /// GET /hs/inventory/nomen.
+  ///
+  /// Принимает JSON-массив либо объект с числовыми ключами (типичный формат
+  /// 1С). Элементом может быть строка или объект с полем «Номенклатура» /
+  /// «Наименование».
+  Future<Result<List<String>>> getNomenclatures() async {
+    const path = 'hs/inventory/nomen';
+    try {
+      final res = await _client.getJson<dynamic>(path);
+      final data = res.data is String
+          ? jsonDecode(res.data as String)
+          : res.data;
+      final Iterable<dynamic> items;
+      if (data is List) {
+        items = data;
+      } else if (data is Map) {
+        items = data.values;
+      } else {
+        return const Failure(
+          ParseError('Ожидался список номенклатурных позиций'),
+        );
+      }
+
+      final result = <String>[];
+      final seen = <String>{};
+      for (final item in items) {
+        final String value;
+        if (item is Map) {
+          value =
+              (item['Номенклатура'] ??
+                      item['Наименование'] ??
+                      item['НоменклатураНаименование'])
+                  ?.toString()
+                  .trim() ??
+              '';
+        } else {
+          value = item?.toString().trim() ?? '';
+        }
+        if (value.isNotEmpty && seen.add(value)) result.add(value);
+      }
+      result.sort(
+        (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
+      );
+      return Success(result);
+    } on DioException catch (e) {
+      return Failure(ApiError.fromDio(e));
+    } catch (e) {
+      _log.warning('Ошибка получения списка номенклатуры: $e');
+      return const Failure(
+        ParseError('Не удалось разобрать список номенклатурных позиций'),
+      );
+    }
+  }
+
   /// Список характеристик выбранной номенклатуры.
   /// GET /hs/inventory/invent/{Номенклатура} (Номенклатура URL-encoded).
   /// 1С возвращает JSON-массив строк: ["21,5\" AOC №…", ...].

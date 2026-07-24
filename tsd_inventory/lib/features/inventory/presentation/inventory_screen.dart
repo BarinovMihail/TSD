@@ -13,6 +13,7 @@ import '../application/scan_controller.dart';
 import '../domain/doc_table_row.dart';
 import 'barcode_dialog.dart';
 import 'row_card.dart';
+import 'unknown_barcode_dialog.dart';
 
 class InventoryScreen extends ConsumerStatefulWidget {
   const InventoryScreen({super.key, required this.docCode});
@@ -37,7 +38,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     _scanFocus.addListener(() {
       if (mounted && !_scanFocus.hasFocus) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && !_scanFocus.hasFocus) _scanFocus.requestFocus();
+          if (!mounted) return;
+          final screenIsCurrent = ModalRoute.of(context)?.isCurrent ?? false;
+          if (screenIsCurrent && !_scanFocus.hasFocus) {
+            _scanFocus.requestFocus();
+          }
         });
       }
     });
@@ -82,21 +87,68 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
           ),
         );
       case NotFoundInDocument():
-        // Штрихкод отсутствует во всех массивах «Штрихкоды» строк документа.
-        // Резервный запрос и добавление номенклатуры больше не предлагаются.
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(AppStrings.barcodeNotFoundInDoc),
-            backgroundColor: Theme.of(context).colorScheme.error,
-            duration: const Duration(seconds: 2),
-          ),
-        );
+        await _showUnknownBarcode(outcome.code);
       case Ambiguous():
         _showAmbiguous(outcome.candidates);
       case ScanIgnored():
         // Пустое после trim — игнорируем без反馈.
         break;
+    }
+  }
+
+  Future<void> _showUnknownBarcode(String code) async {
+    final normalized = code.trim();
+    try {
+      final shouldCreate = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text(AppStrings.unknownBarcodeTitle),
+          content: Text(AppStrings.unknownBarcodeMessage(normalized)),
+          actions: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(56),
+                  ),
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: const Text(
+                    AppStrings.createNomenclatureFromBarcode,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text(AppStrings.cancel),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+      if (!mounted || shouldCreate != true) return;
+
+      final ctrl = ref.read(
+        inventoryScreenControllerProvider(widget.docCode),
+      );
+      await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => UnknownBarcodeDialog(
+          barcode: normalized,
+          ctrl: ctrl,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _scanFocus.requestFocus();
+        });
+      }
     }
   }
 

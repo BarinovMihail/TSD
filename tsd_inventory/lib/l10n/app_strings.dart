@@ -94,6 +94,20 @@ abstract final class AppStrings {
 
   // Сканирование: сообщения по штрихкоду
   static const barcodeNotFoundInDoc = 'Штрихкод не найден в текущем документе';
+  static const unknownBarcodeTitle = 'Штрихкод не найден';
+  static String unknownBarcodeMessage(String barcode) =>
+      'Штрихкод $barcode не найден в текущем документе.';
+  static const createNomenclatureFromBarcode =
+      'Создать номенклатуру с этим штрихкодом';
+  static const selectNomenclatureTitle = 'Выбор номенклатуры';
+  static const scannedBarcodeLabel = 'Отсканированный штрихкод';
+  static const nomenclatureLabel = 'Номенклатура';
+  static const searchNomenclature = 'Поиск номенклатуры';
+  static const loadingNomenclatures = 'Загрузка номенклатуры…';
+  static const nomenclaturesEmpty = 'Номенклатурные позиции не найдены';
+  static const selectCharacteristic = 'Выберите характеристику';
+  static const changeNomenclature = 'Изменить номенклатуру';
+  static const assignBarcode = 'Привязать штрихкод';
 
   // Добавление / просмотр штрихкодов позиции
   static const addBarcodeTitle = 'Добавление штрихкода';

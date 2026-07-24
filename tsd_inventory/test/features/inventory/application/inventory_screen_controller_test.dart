@@ -7,6 +7,7 @@ import 'package:tsd_inventory/core/storage/app_database.dart';
 import 'package:tsd_inventory/features/inventory/application/inventory_screen_controller.dart';
 import 'package:tsd_inventory/features/inventory/application/scan_controller.dart';
 import 'package:tsd_inventory/features/inventory/data/inventory_repository.dart';
+import 'package:tsd_inventory/features/inventory/domain/barcode_assignment.dart';
 import 'package:tsd_inventory/features/inventory/domain/barcode_matcher.dart';
 import 'package:tsd_inventory/features/inventory/domain/doc_table_row.dart';
 
@@ -324,6 +325,81 @@ void main() {
       );
 
       expect(r.outcome, AddBarcodeOutcome.inconclusive);
+    });
+  });
+
+  group('assignUnknownBarcodeAndReload', () {
+    test('успех привязки перечитывает открытый документ', () async {
+      when(
+        () => repo.addScannedBarcode(any(), any(), any()),
+      ).thenAnswer((_) async => const Success(null));
+      when(
+        () => repo.getTable(any()),
+      ).thenAnswer((_) async => const Success([]));
+      final ctrl = _controller(repo, db, feedback, _row());
+
+      final result = await ctrl.assignUnknownBarcodeAndReload(
+        nomenclature: 'Клавиатура',
+        characteristic: '',
+        barcode: ' 123 ',
+      );
+
+      expect(result.outcome, AddBarcodeOutcome.done);
+      verify(
+        () => repo.addScannedBarcode('Клавиатура', '', '123'),
+      ).called(1);
+      verify(() => repo.getTable('АЕ-1')).called(1);
+    });
+
+    test('после таймаута проверяет глобальную привязку по штрихкоду', () async {
+      when(
+        () => repo.addScannedBarcode(any(), any(), any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      when(() => repo.getBarcodeAssignment('123')).thenAnswer(
+        (_) async => const Success(
+          BarcodeAssignment(
+            nomenclature: 'Клавиатура',
+            characteristic: 'Белая',
+          ),
+        ),
+      );
+      when(
+        () => repo.getTable(any()),
+      ).thenAnswer((_) async => const Success([]));
+      final ctrl = _controller(repo, db, feedback, _row());
+
+      final result = await ctrl.assignUnknownBarcodeAndReload(
+        nomenclature: 'Клавиатура',
+        characteristic: 'Белая',
+        barcode: '123',
+      );
+
+      expect(result.outcome, AddBarcodeOutcome.verifiedAfterTimeout);
+      verify(() => repo.getBarcodeAssignment('123')).called(1);
+    });
+
+    test('чужая привязка после таймаута не подтверждает успех', () async {
+      when(
+        () => repo.addScannedBarcode(any(), any(), any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      when(() => repo.getBarcodeAssignment('123')).thenAnswer(
+        (_) async => const Success(
+          BarcodeAssignment(
+            nomenclature: 'Другая позиция',
+            characteristic: '',
+          ),
+        ),
+      );
+      final ctrl = _controller(repo, db, feedback, _row());
+
+      final result = await ctrl.assignUnknownBarcodeAndReload(
+        nomenclature: 'Клавиатура',
+        characteristic: '',
+        barcode: '123',
+      );
+
+      expect(result.outcome, AddBarcodeOutcome.inconclusive);
+      verifyNever(() => repo.getTable(any()));
     });
   });
 

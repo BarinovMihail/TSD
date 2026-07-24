@@ -142,6 +142,59 @@ void main() {
     });
   });
 
+  group('getNomenclatures — полный список номенклатуры', () {
+    test('GET /nomen, trim, дедупликация и сортировка', () async {
+      when(() => client.getJson<dynamic>(any())).thenAnswer(
+        (_) async => _jsonResponse<dynamic>([
+          '  Принтер ',
+          'Монитор',
+          '',
+          'Монитор',
+        ]),
+      );
+      final repo = InventoryRepository(client: client, db: db);
+
+      final result = await repo.getNomenclatures();
+
+      expect(result, isA<Success<List<String>>>());
+      expect((result as Success<List<String>>).value, ['Монитор', 'Принтер']);
+      verify(() => client.getJson<dynamic>('hs/inventory/nomen')).called(1);
+    });
+
+    test('принимает строковый JSON, объект 1С и поля с наименованием', () async {
+      when(() => client.getJson<dynamic>(any())).thenAnswer(
+        (_) async => _jsonResponse<dynamic>(
+          jsonEncode({
+            '1': {'Номенклатура': 'Монитор'},
+            '2': {'Наименование': 'Клавиатура'},
+            '3': {'НоменклатураНаименование': 'Мышь'},
+          }),
+        ),
+      );
+      final repo = InventoryRepository(client: client, db: db);
+
+      final result = await repo.getNomenclatures();
+
+      expect((result as Success<List<String>>).value, [
+        'Клавиатура',
+        'Монитор',
+        'Мышь',
+      ]);
+    });
+
+    test('ответ не в виде списка или объекта → Failure(ParseError)', () async {
+      when(() => client.getJson<dynamic>(any())).thenAnswer(
+        (_) async => _jsonResponse<dynamic>(42),
+      );
+      final repo = InventoryRepository(client: client, db: db);
+
+      final result = await repo.getNomenclatures();
+
+      expect(result, isA<Failure<List<String>>>());
+      expect((result as Failure<List<String>>).error, isA<ParseError>());
+    });
+  });
+
   group('getCharacteristics — список характеристик номенклатуры', () {
     test(
       'путь hs/inventory/invent/{nomenclature}, парсинг массива строк',

@@ -5,6 +5,7 @@ import '../../../core/network/api_error.dart';
 import '../../../core/feedback/feedback_service.dart';
 import '../../../core/result/result.dart';
 import '../../../core/storage/app_database.dart';
+import '../domain/barcode_assignment.dart';
 import '../domain/barcode_matcher.dart';
 import '../domain/doc_table_row.dart';
 import '../data/inventory_repository.dart';
@@ -180,6 +181,49 @@ class InventoryScreenController extends ChangeNotifier {
         barcode: normalized,
       ),
     );
+  }
+
+  /// Привязать неизвестный в текущем документе штрихкод к позиции из полного
+  /// каталога номенклатуры. После сетевой ошибки проверяем результат напрямую
+  /// через /barcode/{ШК}, потому что выбранной позиции может не быть в
+  /// открытом документе и обычная проверка по его строкам здесь недостаточна.
+  Future<({AddBarcodeOutcome outcome, ApiError? error})>
+  assignUnknownBarcodeAndReload({
+    required String nomenclature,
+    required String characteristic,
+    required String barcode,
+  }) async {
+    final normalized = barcode.trim();
+    final res = await repo.addScannedBarcode(
+      nomenclature,
+      characteristic,
+      normalized,
+    );
+
+    if (res is Success) {
+      await reload();
+      return (outcome: AddBarcodeOutcome.done, error: null);
+    }
+
+    final err = (res as Failure<void>).error;
+    if (err is! NetworkError) {
+      return (outcome: AddBarcodeOutcome.failed, error: err);
+    }
+
+    final lookup = await repo.getBarcodeAssignment(normalized);
+    if (lookup is Success<BarcodeAssignment?> &&
+        lookup.value?.matches(
+              nomenclature: nomenclature,
+              characteristic: characteristic,
+            ) ==
+            true) {
+      await reload();
+      return (
+        outcome: AddBarcodeOutcome.verifiedAfterTimeout,
+        error: null,
+      );
+    }
+    return (outcome: AddBarcodeOutcome.inconclusive, error: null);
   }
 
   /// Удалить штрихкод в 1С и перечитать документ.
