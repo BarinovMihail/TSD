@@ -23,12 +23,13 @@ class _MockFeedback extends Mock implements FeedbackService {}
 DocTableRow _row({
   int lineNumber = 1,
   String nomenclature = 'Монитор',
+  String nomenclatureCode = '001',
   String characteristic = '',
 }) => DocTableRow(
   lineNumber: lineNumber,
   inventoryNumber: '',
   nomenclature: nomenclature,
-  nomenclatureCode: '001',
+  nomenclatureCode: nomenclatureCode,
   characteristic: characteristic,
   series: '',
   seriesStatus: '0',
@@ -176,6 +177,53 @@ void main() {
     ).called(1);
     verify(
       () => repo.addNewLine('АЕ-1', 'Клавиатура', ''),
+    ).called(1);
+  });
+
+  testWidgets('характеристика «-» выбирается как реальная, а не пустая', (
+    tester,
+  ) async {
+    when(
+      () => repo.getNomenclatures(),
+    ).thenAnswer(
+      (_) async => const Success(['015.020.063.00052 Седло']),
+    );
+    when(
+      () => repo.getCharacteristics('015.020.063.00052 Седло'),
+    ).thenAnswer((_) async => const Success(['-']));
+    when(
+      () => repo.getTable(any()),
+    ).thenAnswer(
+      (_) async => Success([
+        _row(
+          lineNumber: 2,
+          nomenclature: 'Седло',
+          nomenclatureCode: '015.020.063.00052',
+          characteristic: '-',
+        ),
+      ]),
+    );
+    final controller = _controller(repo, db, feedback);
+
+    await tester.pumpWidget(wrap(controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('015.020.063.00052 Седло'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('-'), findsOneWidget);
+    expect(find.text(AppStrings.withoutCharacteristic), findsNothing);
+    await tester.tap(find.text(AppStrings.assignBarcode));
+    await tester.pumpAndSettle();
+
+    verify(
+      () => repo.addScannedBarcode(
+        '015.020.063.00052 Седло',
+        '-',
+        '460123',
+      ),
+    ).called(1);
+    verify(
+      () => repo.addNewLine('АЕ-1', '015.020.063.00052 Седло', '-'),
     ).called(1);
   });
 

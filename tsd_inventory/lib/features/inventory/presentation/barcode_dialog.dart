@@ -142,9 +142,14 @@ class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
       onValue: (list) {
         setState(() {
           _characteristics = list;
-          // По умолчанию — «Без характеристики», если список не пуст —
-          // пользователь может выбрать конкретную.
-          _selected = '';
+          // Пустое значение допустимо только когда 1С не вернула ни одной
+          // характеристики. Единственную реальную характеристику (включая
+          // «-») выбираем автоматически.
+          _selected = list.isEmpty
+              ? ''
+              : list.length == 1
+              ? list.single
+              : null;
         });
       },
       orElse: (err) {
@@ -330,7 +335,9 @@ class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
   bool get _canSubmit {
     if (_sending) return true;
     if (_charPrefilled) return true; // характеристика уже есть
-    return _characteristics != null && _loadError == null;
+    return _characteristics != null &&
+        _loadError == null &&
+        _selected != null;
   }
 
   Widget _characteristicField(ColorScheme scheme) {
@@ -373,8 +380,9 @@ class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
         ],
       );
     }
-    // Вариант «Без характеристики» (значение '') + загруженные.
-    final items = <String>['', ...list];
+    // «Без характеристики» допустимо только при реально пустом списке 1С.
+    // Значение «-» остаётся обычной самостоятельной характеристикой.
+    final items = list.isEmpty ? const <String>[''] : list;
     return DropdownButtonFormField<String>(
       decoration: const InputDecoration(
         labelText: AppStrings.characteristicLabel,

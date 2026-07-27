@@ -275,6 +275,30 @@ void main() {
       expect((res as Success<List<String>>).value, ['A', 'B']);
     });
 
+    test('принимает единственную характеристику строкой, включая «-»', () async {
+      when(
+        () => client.getJson<dynamic>(any()),
+      ).thenAnswer((_) async => _jsonResponse<dynamic>(jsonEncode('-')));
+      final repo = InventoryRepository(client: client, db: db);
+
+      final res = await repo.getCharacteristics('Седло');
+
+      expect((res as Success<List<String>>).value, ['-']);
+    });
+
+    test('принимает объект с числовыми ключами как массив 1С', () async {
+      when(
+        () => client.getJson<dynamic>(any()),
+      ).thenAnswer(
+        (_) async => _jsonResponse<dynamic>({'0': '-', '1': 'Красное'}),
+      );
+      final repo = InventoryRepository(client: client, db: db);
+
+      final res = await repo.getCharacteristics('Седло');
+
+      expect((res as Success<List<String>>).value, ['-', 'Красное']);
+    });
+
     test('пустые строки отбрасываются, остальные trim-ятся', () async {
       when(() => client.getJson<dynamic>(any())).thenAnswer(
         (_) async => _jsonResponse<dynamic>(['  A  ', '', '   ', 'B']),
@@ -286,7 +310,7 @@ void main() {
       expect((res as Success<List<String>>).value, ['A', 'B']);
     });
 
-    test('не-массив → Success([])', () async {
+    test('неожиданный объект → Failure(ParseError)', () async {
       when(
         () => client.getJson<dynamic>(any()),
       ).thenAnswer((_) async => _jsonResponse<dynamic>({'x': 1}));
@@ -294,7 +318,8 @@ void main() {
 
       final res = await repo.getCharacteristics('Монитор');
 
-      expect((res as Success<List<String>>).value, isEmpty);
+      expect(res, isA<Failure<List<String>>>());
+      expect((res as Failure<List<String>>).error, isA<ParseError>());
     });
 
     test('сетевая ошибка Dio → Failure(NetworkError)', () async {
@@ -313,8 +338,7 @@ void main() {
     });
 
     test(
-      'HTTP 404 → Success([]): характеристики не найдены, диалог не блокируется '
-      '(в т.ч. номенклатуры со слэшом, ломающим URL)',
+      'HTTP 404 не подменяется отсутствием характеристик',
       () async {
         when(() => client.getJson<dynamic>(any())).thenThrow(
           DioException(
@@ -330,8 +354,8 @@ void main() {
 
         final res = await repo.getCharacteristics('яяя_Удлинитель/10.9/');
 
-        expect(res, isA<Success>());
-        expect((res as Success<List<String>>).value, isEmpty);
+        expect(res, isA<Failure<List<String>>>());
+        expect((res as Failure<List<String>>).error, isA<NotFoundError>());
       },
     );
 

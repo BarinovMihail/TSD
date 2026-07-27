@@ -74,7 +74,13 @@ class _UnknownBarcodeDialogState extends State<UnknownBarcodeDialog> {
         setState(() {
           _characteristics = items;
           // Если характеристик нет, в 1С передаётся пустая строка.
-          _selectedCharacteristic = items.isEmpty ? '' : null;
+          // Единственную реальную характеристику (включая «-») выбираем
+          // автоматически, не подменяя её вариантом «Без характеристики».
+          _selectedCharacteristic = items.isEmpty
+              ? ''
+              : items.length == 1
+              ? items.single
+              : null;
         });
       },
       orElse: (error) => setState(() => _characteristicsError = error),

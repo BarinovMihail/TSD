@@ -130,12 +130,12 @@ void main() {
       },
     );
 
-    testWidgets('пустая характеристика → «Без характеристики» отправляет ""', (
+    testWidgets('пустой список → «Без характеристики» отправляет ""', (
       tester,
     ) async {
       when(
         () => repo.getCharacteristics(any()),
-      ).thenAnswer((_) async => const Success(['A', 'B']));
+      ).thenAnswer((_) async => const Success([]));
       when(
         () => repo.addBarcode(any(), any()),
       ).thenAnswer((_) async => const Success(null));
@@ -149,7 +149,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // По умолчанию выбран «Без характеристики».
+      expect(find.text(AppStrings.withoutCharacteristic), findsOneWidget);
       await tester.tap(find.text('Добавить штрихкод'));
       await tester.pumpAndSettle();
 
@@ -158,6 +158,33 @@ void main() {
       ).captured;
       expect(captured[0], 'Монитор');
       expect(captured[1], '');
+    });
+
+    testWidgets('единственная характеристика «-» не заменяется пустой', (
+      tester,
+    ) async {
+      when(
+        () => repo.getCharacteristics(any()),
+      ).thenAnswer((_) async => const Success(['-']));
+      when(
+        () => repo.addBarcode(any(), any()),
+      ).thenAnswer((_) async => const Success(null));
+      when(
+        () => repo.getTable(any()),
+      ).thenAnswer((_) async => const Success([]));
+      final ctrl = _controller(repo, db, feedback, _row(characteristic: ''));
+
+      await tester.pumpWidget(
+        wrap(AddBarcodeDialog(row: ctrl.scan!.rows.first, ctrl: ctrl), ctrl),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('-'), findsOneWidget);
+      expect(find.text(AppStrings.withoutCharacteristic), findsNothing);
+      await tester.tap(find.text(AppStrings.addBarcode));
+      await tester.pumpAndSettle();
+
+      verify(() => repo.addBarcode('Монитор', '-')).called(1);
     });
 
     testWidgets(

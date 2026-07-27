@@ -124,7 +124,8 @@ class InventoryRepository {
       final Iterable<dynamic> items;
       if (data is List) {
         items = data;
-      } else if (data is Map) {
+      } else if (data is Map &&
+          data.keys.every((key) => int.tryParse(key.toString()) != null)) {
         items = data.values;
       } else {
         return const Failure(
@@ -165,7 +166,8 @@ class InventoryRepository {
 
   /// Список характеристик выбранной номенклатуры.
   /// GET /hs/inventory/invent/{Номенклатура} (Номенклатура URL-encoded).
-  /// 1С возвращает JSON-массив строк: ["21,5\" AOC №…", ...].
+  /// 1С может вернуть JSON-массив строк, одиночную строку или объект
+  /// с числовыми ключами.
   /// Пустые строки отбрасываются, остальные trim-ятся.
   Future<Result<List<String>>> getCharacteristics(String nomenclature) async {
     final path = 'hs/inventory/invent/${Uri.encodeComponent(nomenclature)}';
@@ -174,21 +176,26 @@ class InventoryRepository {
       final data = res.data is String
           ? jsonDecode(res.data as String)
           : res.data;
-      if (data is! List) return const Success([]);
+      final Iterable<dynamic> items;
+      if (data is List) {
+        items = data;
+      } else if (data is Map) {
+        items = data.values;
+      } else if (data is String || data is num) {
+        items = [data];
+      } else {
+        return const Failure(
+          ParseError('Некорректный ответ списка характеристик'),
+        );
+      }
       final result = <String>[];
-      for (final item in data) {
+      final seen = <String>{};
+      for (final item in items) {
         final c = item?.toString().trim() ?? '';
-        if (c.isNotEmpty) result.add(c);
+        if (c.isNotEmpty && seen.add(c)) result.add(c);
       }
       return Success(result);
     } on DioException catch (e) {
-      // HTTP 404 — это не ошибка загрузки, а отсутствие характеристик.
-      // Сюда попадают в т.ч. номенклатуры со спецсимволами (например «/»),
-      // из-за которых веб-сервер перед 1С режет %2F и рвёт маршрут: 1С их не
-      // находит, и добавление штрихкода оказывалось полностью заблокировано.
-      // Запись штрихкода идёт POST-ом в теле JSON (символы в названии там не
-      // мешают), поэтому отдаём пустой список и не блокируем диалог.
-      if (e.response?.statusCode == 404) return const Success([]);
       return Failure(ApiError.fromDio(e));
     } catch (e) {
       _log.warning('Ошибка получения характеристик: $e');
