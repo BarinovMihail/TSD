@@ -20,6 +20,7 @@ class _MockFeedback extends Mock implements FeedbackService {}
 DocTableRow _row({
   int lineNumber = 1,
   String nomenclature = 'Монитор',
+  String nomenclatureCode = '00-00000123',
   String characteristic = 'Black',
   List<String> barcodes = const [],
   int qtyActual = 0,
@@ -27,7 +28,7 @@ DocTableRow _row({
   lineNumber: lineNumber,
   inventoryNumber: '',
   nomenclature: nomenclature,
-  nomenclatureCode: '00-00000123',
+  nomenclatureCode: nomenclatureCode,
   characteristic: characteristic,
   series: '',
   seriesStatus: '0',
@@ -77,6 +78,9 @@ void main() {
     when(
       () => db.getScanProgress(any()),
     ).thenAnswer((_) async => <int, ScanProgressData>{});
+    when(
+      () => repo.getBarcodeAssignment(any()),
+    ).thenAnswer((_) async => const Success(null));
   });
 
   test('reload сохраняет серверный факт при локальной записи с нулём', () async {
@@ -329,6 +333,54 @@ void main() {
 
       expect(r.outcome, AddBarcodeOutcome.inconclusive);
     });
+
+    test(
+      'ошибка POST не показывается, если регистр подтверждает ту же позицию',
+      () async {
+        when(
+          () => repo.addScannedBarcode(any(), any(), any()),
+        ).thenAnswer((_) async => const Failure(ServerError(code: 500)));
+        when(() => repo.getBarcodeAssignment('460123')).thenAnswer(
+          (_) async => const Success(
+            BarcodeAssignment(
+              nomenclature: '015.020.063.00052 Седло',
+              characteristic: '',
+            ),
+          ),
+        );
+        when(
+          () => repo.getTable(any()),
+        ).thenAnswer(
+          (_) async => Success([
+            _row(
+              nomenclature: 'Седло',
+              nomenclatureCode: '015.020.063.00052',
+              characteristic: '',
+            ),
+          ]),
+        );
+        final ctrl = _controller(
+          repo,
+          db,
+          feedback,
+          _row(
+            nomenclature: 'Седло',
+            nomenclatureCode: '015.020.063.00052',
+            characteristic: '',
+          ),
+        );
+
+        final result = await ctrl.addScannedBarcodeAndReload(
+          lineNumber: 1,
+          nomenclature: 'Седло',
+          characteristic: '',
+          barcode: '460123',
+        );
+
+        expect(result.outcome, AddBarcodeOutcome.verifiedAfterTimeout);
+        expect(ctrl.scan!.rows.single.barcodes, ['460123']);
+      },
+    );
   });
 
   group('assignUnknownBarcodeAndReload', () {
@@ -474,6 +526,41 @@ void main() {
           () => repo.addNewLine('АЕ-1', 'Клавиатура', 'Белая'),
         ).called(1);
         expect(ctrl.scan!.rows.single.qtyActual, 1);
+      },
+    );
+
+    test(
+      'добавляет позицию без характеристики, когда каталог содержит код в названии',
+      () async {
+        when(
+          () => repo.addScannedBarcode(any(), any(), any()),
+        ).thenAnswer((_) async => const Success(null));
+        when(
+          () => repo.addNewLine(any(), any(), any()),
+        ).thenAnswer((_) async => const Success(null));
+        when(
+          () => repo.getTable(any()),
+        ).thenAnswer(
+          (_) async => Success([
+            _row(
+              lineNumber: 2,
+              nomenclature: 'Седло',
+              nomenclatureCode: '015.020.063.00052',
+              characteristic: '',
+            ),
+          ]),
+        );
+        final ctrl = _controller(repo, db, feedback, _row());
+
+        final result = await ctrl.assignUnknownBarcodeAndReload(
+          nomenclature: '015.020.063.00052 Седло',
+          characteristic: '',
+          barcode: '460123',
+        );
+
+        expect(result.outcome, AddBarcodeOutcome.done);
+        expect(ctrl.scan!.rows.single.qtyActual, 1);
+        expect(ctrl.scan!.rows.single.barcodes, ['460123']);
       },
     );
   });

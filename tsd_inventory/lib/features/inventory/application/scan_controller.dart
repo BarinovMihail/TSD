@@ -57,6 +57,7 @@ class ScanController extends ChangeNotifier {
   final AppDatabase _db;
   final BarcodeMatcher _matcher;
   final FeedbackService _feedback;
+  final Map<String, BarcodeAssignment> _knownBarcodeAssignments = {};
 
   List<DocTableRow> rows;
 
@@ -139,6 +140,7 @@ class ScanController extends ChangeNotifier {
     String code,
     BarcodeAssignment assignment,
   ) async {
+    rememberRegisteredBarcode(code, assignment);
     final match = _matcher.matchByNomenclatureCharacteristic(
       assignment.nomenclature,
       assignment.characteristic,
@@ -159,7 +161,13 @@ class ScanController extends ChangeNotifier {
   ///
   /// Если такая пара уже присутствует в документе, новая строка не создаётся:
   /// существующая строка просто отмечается как отсканированная.
-  Future<Result<void>> addMissingLine(BarcodeAssignment assignment) async {
+  Future<Result<void>> addMissingLine(
+    BarcodeAssignment assignment, {
+    String? barcode,
+  }) async {
+    if (barcode != null && barcode.trim().isNotEmpty) {
+      rememberRegisteredBarcode(barcode, assignment);
+    }
     final current = _matcher.matchByNomenclatureCharacteristic(
       assignment.nomenclature,
       assignment.characteristic,
@@ -180,10 +188,12 @@ class ScanController extends ChangeNotifier {
       assignment.nomenclature,
       assignment.characteristic,
     );
-    if (addResult is Failure<void>) return addResult;
 
+    // Даже после HTTP-ошибки 1С могла успеть провести /newStr. Перечитываем
+    // документ и доверяем фактическому состоянию, а не потерянному ответу.
     final tableResult = await _repo.getTable(docCode);
     if (tableResult is Failure<List<DocTableRow>>) {
+      if (addResult is Failure<void>) return addResult;
       return Failure(tableResult.error);
     }
     replaceRows((tableResult as Success<List<DocTableRow>>).value);
@@ -195,6 +205,7 @@ class ScanController extends ChangeNotifier {
       rows,
     );
     if (added.isNone) {
+      if (addResult is Failure<void>) return addResult;
       return const Failure(
         ParseError('Новая строка не найдена после добавления'),
       );
@@ -262,7 +273,72 @@ class ScanController extends ChangeNotifier {
   /// обновляются здесь — новое сканирование сразу их использует.
   void replaceRows(List<DocTableRow> fresh) {
     rows = List.of(fresh);
+    for (final entry in _knownBarcodeAssignments.entries) {
+      _applyKnownBarcode(entry.key, entry.value);
+    }
     notifyListeners();
+  }
+
+  /// Сохраняет подтверждённую через /barcode привязку в состоянии документа.
+  /// Это компенсирует задержку 1С: регистр уже обновлён, а массив
+  /// «Штрихкоды» в /code иногда ещё пустой.
+  void rememberRegisteredBarcode(
+    String barcode,
+    BarcodeAssignment assignment,
+  ) {
+    final normalized = barcode.trim();
+    if (normalized.isEmpty) return;
+    _knownBarcodeAssignments[normalized] = assignment;
+    _applyKnownBarcode(normalized, assignment);
+    notifyListeners();
+  }
+
+  void forgetRegisteredBarcode(String barcode) {
+    final normalized = barcode.trim();
+    if (normalized.isEmpty) return;
+    _knownBarcodeAssignments.remove(normalized);
+    rows = [
+      for (final row in rows)
+        row.copyWith(
+          barcodes: [
+            for (final value in row.barcodes)
+              if (value.trim() != normalized) value,
+          ],
+        ),
+    ];
+    notifyListeners();
+  }
+
+  void _applyKnownBarcode(
+    String barcode,
+    BarcodeAssignment assignment,
+  ) {
+    final match = _matcher.matchByNomenclatureCharacteristic(
+      assignment.nomenclature,
+      assignment.characteristic,
+      rows,
+    );
+    if (!match.isUnique) return;
+    final lineNumber = match.exact.single.lineNumber;
+
+    // Сначала удаляем код со всех строк: подтверждённая привязка могла быть
+    // перенесена на другую позицию.
+    rows = [
+      for (final row in rows)
+        row.copyWith(
+          barcodes: [
+            for (final value in row.barcodes)
+              if (value.trim() != barcode) value,
+          ],
+        ),
+    ];
+    rows = [
+      for (final row in rows)
+        if (row.lineNumber == lineNumber)
+          row.copyWith(barcodes: [...row.barcodes, barcode])
+        else
+          row,
+    ];
   }
 
   /// Отправка результатов в 1С. Успех → очистка локального прогресса

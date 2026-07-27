@@ -19,6 +19,7 @@ class _MockFeedback extends Mock implements FeedbackService {}
 DocTableRow _row(
   int line, {
   String? nomenclature,
+  String? nomenclatureCode,
   String characteristic = '',
   List<String> barcodes = const [],
   int qtyActual = 0,
@@ -26,7 +27,7 @@ DocTableRow _row(
   lineNumber: line,
   inventoryNumber: '',
   nomenclature: nomenclature ?? 'N$line',
-  nomenclatureCode: 'k$line',
+  nomenclatureCode: nomenclatureCode ?? 'k$line',
   characteristic: characteristic,
   series: '',
   seriesStatus: '0',
@@ -347,6 +348,83 @@ void main() {
           controller.rows.firstWhere((row) => row.lineNumber == 2).qtyActual,
           1,
         );
+      },
+    );
+
+    test(
+      'позиция с кодом в названии сопоставляется и сохраняет известный ШК',
+      () async {
+        const codedAssignment = BarcodeAssignment(
+          nomenclature: '015.020.063.00052 Седло',
+          characteristic: '',
+        );
+        final controller = _controller(
+          repo: repo,
+          db: db,
+          feedback: feedback,
+          rows: [
+            _row(
+              1,
+              nomenclature: 'Седло',
+              nomenclatureCode: '015.020.063.00052',
+            ),
+          ],
+        );
+
+        final result = await controller.onRegisteredBarcode(
+          '460123',
+          codedAssignment,
+        );
+
+        expect(result, isA<Found>());
+        expect(controller.rows.single.qtyActual, 1);
+        expect(controller.rows.single.barcodes, ['460123']);
+
+        controller.replaceRows([
+          _row(
+            1,
+            nomenclature: 'Седло',
+            nomenclatureCode: '015.020.063.00052',
+          ),
+        ]);
+        expect(controller.rows.single.barcodes, ['460123']);
+      },
+    );
+
+    test(
+      'ошибка /newStr считается успехом, если строка уже появилась в документе',
+      () async {
+        const codedAssignment = BarcodeAssignment(
+          nomenclature: '015.020.063.00052 Седло',
+          characteristic: '',
+        );
+        when(
+          () => repo.addNewLine(any(), any(), any()),
+        ).thenAnswer((_) async => const Failure(ServerError(code: 500)));
+        when(() => repo.getTable('АЕ-1')).thenAnswer(
+          (_) async => Success([
+            _row(
+              2,
+              nomenclature: 'Седло',
+              nomenclatureCode: '015.020.063.00052',
+            ),
+          ]),
+        );
+        final controller = _controller(
+          repo: repo,
+          db: db,
+          feedback: feedback,
+          rows: [_row(1, nomenclature: 'Монитор')],
+        );
+
+        final result = await controller.addMissingLine(
+          codedAssignment,
+          barcode: '460123',
+        );
+
+        expect(result, isA<Success<void>>());
+        expect(controller.rows.single.qtyActual, 1);
+        expect(controller.rows.single.barcodes, ['460123']);
       },
     );
   });

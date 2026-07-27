@@ -36,18 +36,29 @@ List<DocTableRow> parseDocTable(Object? json) {
 /// Разбор массива «Штрихкоды» одной строки документа.
 ///
 /// Контракт:
-/// - значение может отсутствовать, быть null или иметь неправильный формат →
-///   пустой список;
+/// - значение может быть массивом, одиночной строкой/числом или объектом
+///   с числовыми ключами (варианты сериализации массива в 1С);
+/// - отсутствующее/null значение → пустой список;
 /// - каждый штрихкод приводится к строке и trim-ится;
 /// - пустые значения отбрасываются;
 /// - штрихкоды НЕ преобразуются в числа, чтобы не потерять ведущие нули;
 /// - у позиции может быть несколько штрихкодов.
 List<String> parseBarcodes(Object? raw) {
-  if (raw is! List) return const [];
+  final Iterable<Object?> items;
+  if (raw is List) {
+    items = raw;
+  } else if (raw is Map) {
+    items = raw.values.cast<Object?>();
+  } else if (raw is String || raw is num) {
+    items = [raw];
+  } else {
+    return const [];
+  }
   final result = <String>[];
-  for (final item in raw) {
+  final seen = <String>{};
+  for (final item in items) {
     final code = item?.toString().trim() ?? '';
-    if (code.isNotEmpty) result.add(code);
+    if (code.isNotEmpty && seen.add(code)) result.add(code);
   }
   return result;
 }

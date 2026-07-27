@@ -1,3 +1,4 @@
+import 'barcode_assignment.dart';
 import 'doc_table_row.dart';
 
 /// Результат сопоставления отсканированного штрихкода строкам таблицы.
@@ -52,7 +53,11 @@ class BarcodeMatcher {
     final hits = rows
         .where(
           (row) =>
-              _normalizeText(row.nomenclature) == normalizedNomenclature &&
+              nomenclatureValuesMatch(
+                normalizedNomenclature,
+                row.nomenclature,
+                nomenclatureCode: row.nomenclatureCode,
+              ) &&
               _normalizeText(row.characteristic) == normalizedCharacteristic,
         )
         .toList();
@@ -60,8 +65,6 @@ class BarcodeMatcher {
   }
 
   String _normalizeText(String value) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) return '';
-    return trimmed.replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+    return normalizeInventoryText(value);
   }
 }

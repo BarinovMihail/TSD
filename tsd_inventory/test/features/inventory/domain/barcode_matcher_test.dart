@@ -1,17 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tsd_inventory/features/inventory/domain/barcode_assignment.dart';
 import 'package:tsd_inventory/features/inventory/domain/barcode_matcher.dart';
 import 'package:tsd_inventory/features/inventory/domain/doc_table_row.dart';
 
 DocTableRow _row(
   int line, {
   String? nomenclature,
+  String? nomenclatureCode,
   String characteristic = '',
   List<String> barcodes = const [],
 }) => DocTableRow(
   lineNumber: line,
   inventoryNumber: '',
   nomenclature: nomenclature ?? 'N$line',
-  nomenclatureCode: 'k$line',
+  nomenclatureCode: nomenclatureCode ?? 'k$line',
   characteristic: characteristic,
   series: '',
   seriesStatus: '0',
@@ -139,5 +141,37 @@ void main() {
 
       expect(result.isUnique, true);
     });
+
+    test('сопоставляет название с префиксом кода со строкой документа', () {
+      final rows = [
+        _row(
+          1,
+          nomenclature: 'Седло',
+          nomenclatureCode: '015.020.063.00052',
+          characteristic: '',
+        ),
+      ];
+
+      final result = BarcodeMatcher().matchByNomenclatureCharacteristic(
+        '015.020.063.00052 Седло',
+        '',
+        rows,
+      );
+
+      expect(result.isUnique, true);
+      expect(result.exact.single.lineNumber, 1);
+    });
+  });
+
+  test('BarcodeAssignment узнаёт ту же позицию без отдельного поля кода', () {
+    const assignment = BarcodeAssignment(
+      nomenclature: '015.020.063.00052 Седло',
+      characteristic: '',
+    );
+
+    expect(
+      assignment.matches(nomenclature: 'Седло', characteristic: ''),
+      true,
+    );
   });
 }

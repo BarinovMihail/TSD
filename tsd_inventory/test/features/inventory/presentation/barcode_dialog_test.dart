@@ -571,7 +571,10 @@ void main() {
     testWidgets('ШК этой же позиции повторно не отправляется', (tester) async {
       when(() => repo.getBarcodeAssignment(any())).thenAnswer(
         (_) async => const Success(
-          BarcodeAssignment(nomenclature: 'Монитор', characteristic: 'Black'),
+          BarcodeAssignment(
+            nomenclature: '00-00000123 Монитор',
+            characteristic: 'Black',
+          ),
         ),
       );
       final ctrl = _controller(

@@ -173,7 +173,47 @@ class InventoryScreenController extends ChangeNotifier {
       characteristic,
       normalized,
     );
-    return _finishBarcodeAdd(
+    final assignment = BarcodeAssignment(
+      nomenclature: nomenclature,
+      characteristic: characteristic,
+    );
+
+    if (res is Success) {
+      await reload();
+      scan?.rememberRegisteredBarcode(normalized, assignment);
+      return (outcome: AddBarcodeOutcome.done, error: null);
+    }
+
+    // Ответ POST мог потеряться уже после записи в регистр. Проверяем
+    // привязку через /barcode, потому что /code не всегда сразу возвращает
+    // новый ШК в массиве строки.
+    final err = (res as Failure<void>).error;
+    final lookup = await repo.getBarcodeAssignment(normalized);
+    var targetCode = '';
+    for (final row in scan?.rows ?? const <DocTableRow>[]) {
+      if (row.lineNumber == lineNumber) {
+        targetCode = row.nomenclatureCode;
+        break;
+      }
+    }
+    if (lookup is Success<BarcodeAssignment?> &&
+        lookup.value?.matches(
+              nomenclature: nomenclature,
+              characteristic: characteristic,
+              nomenclatureCode: targetCode,
+            ) ==
+            true) {
+      await reload();
+      scan?.rememberRegisteredBarcode(normalized, lookup.value!);
+      return (
+        outcome: AddBarcodeOutcome.verifiedAfterTimeout,
+        error: null,
+      );
+    }
+    if (err is! NetworkError) {
+      return (outcome: AddBarcodeOutcome.failed, error: err);
+    }
+    final fallback = await _finishBarcodeAdd(
       res,
       verifyAfterNetworkError: (rows) => _rowHasBarcode(
         rows,
@@ -181,6 +221,10 @@ class InventoryScreenController extends ChangeNotifier {
         barcode: normalized,
       ),
     );
+    if (fallback.outcome == AddBarcodeOutcome.verifiedAfterTimeout) {
+      scan?.rememberRegisteredBarcode(normalized, assignment);
+    }
+    return fallback;
   }
 
   /// Привязать неизвестный штрихкод к позиции из каталога, затем добавить
@@ -206,6 +250,7 @@ class InventoryScreenController extends ChangeNotifier {
           characteristic: characteristic,
         ),
         successOutcome: AddBarcodeOutcome.done,
+        barcode: normalized,
       );
     }
 
@@ -223,6 +268,7 @@ class InventoryScreenController extends ChangeNotifier {
       return _addRegisteredPositionToDocument(
         lookup.value!,
         successOutcome: AddBarcodeOutcome.verifiedAfterTimeout,
+        barcode: normalized,
       );
     }
     if (err is! NetworkError) {
@@ -235,6 +281,7 @@ class InventoryScreenController extends ChangeNotifier {
   _addRegisteredPositionToDocument(
     BarcodeAssignment assignment, {
     required AddBarcodeOutcome successOutcome,
+    String? barcode,
   }) async {
     final scan = this.scan;
     if (scan == null) {
@@ -243,7 +290,10 @@ class InventoryScreenController extends ChangeNotifier {
         error: const ParseError('Документ не загружен'),
       );
     }
-    final result = await scan.addMissingLine(assignment);
+    final result = await scan.addMissingLine(
+      assignment,
+      barcode: barcode,
+    );
     if (result is Failure<void>) {
       return (outcome: AddBarcodeOutcome.failed, error: result.error);
     }
@@ -363,6 +413,7 @@ class InventoryScreenController extends ChangeNotifier {
   }) {
     final scan = this.scan;
     if (scan == null) return;
+    scan.forgetRegisteredBarcode(barcode);
     scan.replaceRows([
       for (final row in scan.rows)
         if (row.lineNumber == lineNumber)
@@ -375,6 +426,14 @@ class InventoryScreenController extends ChangeNotifier {
         else
           row,
     ]);
+    notifyListeners();
+  }
+
+  void rememberRegisteredBarcode(
+    String barcode,
+    BarcodeAssignment assignment,
+  ) {
+    scan?.rememberRegisteredBarcode(barcode, assignment);
     notifyListeners();
   }
 

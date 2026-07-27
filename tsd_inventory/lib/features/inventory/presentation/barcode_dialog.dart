@@ -30,7 +30,9 @@ Future<bool> _confirmScannedBarcodeAssignment({
   if (current.matches(
     nomenclature: target.nomenclature,
     characteristic: target.characteristic,
+    nomenclatureCode: target.nomenclatureCode,
   )) {
+    ctrl.rememberRegisteredBarcode(normalized, current);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text(AppStrings.barcodeAlreadyAssignedHere)),
     );
