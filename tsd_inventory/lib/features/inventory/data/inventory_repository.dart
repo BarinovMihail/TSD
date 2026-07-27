@@ -25,6 +25,7 @@ class InventoryRepository {
 
   final DioClient _client;
   final AppDatabase _db;
+  final Map<String, String> _nomenclatureServerValues = {};
 
   /// GET /hs/inventory/code/{Код} → табличная часть.
   /// Сетевая ошибка + есть кэш → отдаём кэш (офлайн).
@@ -94,7 +95,7 @@ class InventoryRepository {
     const path = 'hs/inventory/newStr';
     final body = {
       'НомерДокумента': docCode,
-      'Номенклатура': nomenclature,
+      'Номенклатура': _nomenclatureForServer(nomenclature),
       'Характеристика': characteristic,
     };
     try {
@@ -135,24 +136,31 @@ class InventoryRepository {
 
       final result = <String>[];
       final seen = <String>{};
+      final serverValues = <String, String>{};
       for (final item in items) {
-        final String value;
+        final String rawValue;
         if (item is Map) {
-          value =
+          rawValue =
               (item['Номенклатура'] ??
                       item['Наименование'] ??
                       item['НоменклатураНаименование'])
-                  ?.toString()
-                  .trim() ??
+                  ?.toString() ??
               '';
         } else {
-          value = item?.toString().trim() ?? '';
+          rawValue = item?.toString() ?? '';
         }
-        if (value.isNotEmpty && seen.add(value)) result.add(value);
+        final value = _nomenclatureDisplayValue(rawValue);
+        if (value.isNotEmpty && seen.add(value)) {
+          result.add(value);
+          serverValues[value] = rawValue;
+        }
       }
       result.sort(
         (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
       );
+      _nomenclatureServerValues
+        ..clear()
+        ..addAll(serverValues);
       return Success(result);
     } on DioException catch (e) {
       return Failure(ApiError.fromDio(e));
@@ -170,16 +178,22 @@ class InventoryRepository {
   /// с числовыми ключами.
   /// Пустые строки отбрасываются, остальные trim-ятся.
   Future<Result<List<String>>> getCharacteristics(String nomenclature) async {
-    final path = 'hs/inventory/invent/${Uri.encodeComponent(nomenclature)}';
+    final serverValue = _nomenclatureForServer(nomenclature);
+    final encoded = Uri.encodeComponent(serverValue);
+    final path = 'hs/inventory/invent/$encoded';
     try {
-      final res = await _client.getJson<dynamic>(path);
+      final res = await _getCharacteristicsResponse(
+        path: path,
+        encodedNomenclature: encoded,
+      );
       final data = res.data is String
           ? jsonDecode(res.data as String)
           : res.data;
       final Iterable<dynamic> items;
       if (data is List) {
         items = data;
-      } else if (data is Map) {
+      } else if (data is Map &&
+          data.keys.every((key) => int.tryParse(key.toString()) != null)) {
         items = data.values;
       } else if (data is String || data is num) {
         items = [data];
@@ -313,7 +327,7 @@ class InventoryRepository {
   }) async {
     const path = 'hs/inventory/newBarcode';
     final body = {
-      'Номенклатура': nomenclature,
+      'Номенклатура': _nomenclatureForServer(nomenclature),
       'Характеристика': characteristic,
       if (barcode != null) 'Штрихкод': barcode,
     };
@@ -330,6 +344,78 @@ class InventoryRepository {
       _log.warning('Ошибка добавления штрихкода: $e');
       return const Failure(NetworkError());
     }
+  }
+
+  /// Возвращает исходное значение ровно в том виде, в котором его прислала 1С.
+  ///
+  /// В интерфейсе управляющие символы заменяются пробелами, а внешние пробелы
+  /// скрываются. Для запросов они значимы, поэтому храним исходное значение
+  /// отдельно от отображаемого.
+  String _nomenclatureForServer(String value) =>
+      _nomenclatureServerValues[value] ?? value;
+
+  /// Делает название безопасным для отображения одной строкой, не изменяя
+  /// обычные внутренние пробелы (в 1С есть разные позиции с одним и двумя
+  /// пробелами).
+  static String _nomenclatureDisplayValue(String value) => value
+      .replaceAll(RegExp(r'[\u0000-\u001F\u007F]'), ' ')
+      .trim();
+
+  /// Некоторые web-серверы декодируют URL до передачи маршрута в 1С. Тогда
+  /// `%2F` снова становится `/` и разрывает параметр `{Номенклатура}` на два
+  /// сегмента. Сначала используем обычное URL-кодирование. Если маршрутизатор
+  /// отвечает ошибкой, повторяем запрос, оставляя опасные символы
+  /// закодированными после первого декодирования.
+  Future<Response<dynamic>> _getCharacteristicsResponse({
+    required String path,
+    required String encodedNomenclature,
+  }) async {
+    try {
+      return await _client.getJson<dynamic>(path);
+    } on DioException catch (error) {
+      final fallbackEncoded = _encodeForDecodedRouter(encodedNomenclature);
+      if (!_isRouteResolutionError(error) ||
+          fallbackEncoded == encodedNomenclature) {
+        rethrow;
+      }
+      _log.info(
+        'Повторный запрос характеристик с защищённым URL-параметром',
+      );
+      return _client.getJson<dynamic>(
+        'hs/inventory/invent/$fallbackEncoded',
+      );
+    }
+  }
+
+  static bool _isRouteResolutionError(DioException error) {
+    final status = error.response?.statusCode;
+    return status == 400 || status == 404 || status == 500;
+  }
+
+  /// Двойное кодирование применяется только к символам, способным изменить
+  /// структуру URL после преждевременного декодирования: /, \, ?, #, %,
+  /// управляющим ASCII-символам и значимым пробелам на краях. Остальная строка
+  /// остаётся обычным encoded path segment.
+  static String _encodeForDecodedRouter(String encoded) {
+    final routeBreakingEscape = RegExp(
+      r'%(?:0[0-9A-F]|1[0-9A-F]|23|25|2F|3F|5C|7F)',
+      caseSensitive: false,
+    );
+    var result = encoded.replaceAllMapped(
+      routeBreakingEscape,
+      (match) => '%25${match.group(0)!.substring(1).toUpperCase()}',
+    );
+    final edgeSpaces = [
+      RegExp(r'^(?:%20)+', caseSensitive: false),
+      RegExp(r'(?:%20)+$', caseSensitive: false),
+    ];
+    for (final pattern in edgeSpaces) {
+      result = result.replaceAllMapped(
+        pattern,
+        (match) => match.group(0)!.replaceAll('%', '%25'),
+      );
+    }
+    return result;
   }
 
   /// Получение ФИО аутентифицированного пользователя. STUB.

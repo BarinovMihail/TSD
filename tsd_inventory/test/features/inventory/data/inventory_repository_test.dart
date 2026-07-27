@@ -169,6 +169,31 @@ void main() {
         'Характеристика': 'Белая',
       });
     });
+
+    test('использует исходное имя позиции из ответа /nomen', () async {
+      when(
+        () => client.getJson<dynamic>('hs/inventory/nomen'),
+      ).thenAnswer(
+        (_) async => _jsonResponse<dynamic>(['Фреза\t20.1660-50']),
+      );
+      when(
+        () => client.postJson<dynamic>(any(), body: any(named: 'body')),
+      ).thenAnswer((_) async => _okResponse<dynamic>());
+      final repo = InventoryRepository(client: client, db: db);
+      await repo.getNomenclatures();
+
+      await repo.addNewLine('АЕ-1', 'Фреза 20.1660-50', '-');
+
+      final body =
+          verify(
+                () => client.postJson<dynamic>(
+                  'hs/inventory/newStr',
+                  body: captureAny(named: 'body'),
+                ),
+              ).captured.single
+              as Map<String, dynamic>;
+      expect(body['Номенклатура'], 'Фреза\t20.1660-50');
+    });
   });
 
   group('getNomenclatures — полный список номенклатуры', () {
@@ -222,6 +247,40 @@ void main() {
       expect(result, isA<Failure<List<String>>>());
       expect((result as Failure<List<String>>).error, isA<ParseError>());
     });
+
+    test(
+      'скрывает управляющие и внешние пробелы, но отправляет в 1С исходное имя',
+      () async {
+        when(
+          () => client.getJson<dynamic>('hs/inventory/nomen'),
+        ).thenAnswer(
+          (_) async => _jsonResponse<dynamic>([
+            'Бор Фрезы ',
+            'Фреза\t20.1660-50',
+          ]),
+        );
+        when(
+          () => client.getJson<dynamic>(
+            'hs/inventory/invent/${Uri.encodeComponent('Бор Фрезы ')}',
+          ),
+        ).thenAnswer((_) async => _jsonResponse<dynamic>(<String>[]));
+        final repo = InventoryRepository(client: client, db: db);
+
+        final nomenclatures = await repo.getNomenclatures();
+        final characteristics = await repo.getCharacteristics('Бор Фрезы');
+
+        expect((nomenclatures as Success<List<String>>).value, [
+          'Бор Фрезы',
+          'Фреза 20.1660-50',
+        ]);
+        expect(characteristics, isA<Success<List<String>>>());
+        verify(
+          () => client.getJson<dynamic>(
+            'hs/inventory/invent/${Uri.encodeComponent('Бор Фрезы ')}',
+          ),
+        ).called(1);
+      },
+    );
   });
 
   group('getCharacteristics — список характеристик номенклатуры', () {
@@ -359,6 +418,75 @@ void main() {
       },
     );
 
+    test(
+      'после ошибки маршрута повторяет запрос с защищённым слешем',
+      () async {
+        const nomenclature = 'МФУ Kyocera 10/9';
+        final encoded = Uri.encodeComponent(nomenclature);
+        final regularPath = 'hs/inventory/invent/$encoded';
+        final protectedPath =
+            'hs/inventory/invent/${encoded.replaceAll('%2F', '%252F')}';
+        when(
+          () => client.getJson<dynamic>(regularPath),
+        ).thenThrow(
+          DioException(
+            requestOptions: RequestOptions(path: regularPath),
+            response: Response<void>(
+              requestOptions: RequestOptions(path: regularPath),
+              statusCode: 404,
+            ),
+            type: DioExceptionType.badResponse,
+          ),
+        );
+        when(
+          () => client.getJson<dynamic>(protectedPath),
+        ).thenAnswer((_) async => _jsonResponse<dynamic>(['-']));
+        final repo = InventoryRepository(client: client, db: db);
+
+        final result = await repo.getCharacteristics(nomenclature);
+
+        expect((result as Success<List<String>>).value, ['-']);
+        verify(() => client.getJson<dynamic>(regularPath)).called(1);
+        verify(() => client.getJson<dynamic>(protectedPath)).called(1);
+      },
+    );
+
+    test(
+      'защищает значимый пробел в конце исходного имени',
+      () async {
+        when(
+          () => client.getJson<dynamic>('hs/inventory/nomen'),
+        ).thenAnswer((_) async => _jsonResponse<dynamic>(['Бор Фрезы ']));
+        final regularPath =
+            'hs/inventory/invent/${Uri.encodeComponent('Бор Фрезы ')}';
+        final protectedPath =
+            'hs/inventory/invent/${Uri.encodeComponent('Бор Фрезы')}%2520';
+        when(
+          () => client.getJson<dynamic>(regularPath),
+        ).thenThrow(
+          DioException(
+            requestOptions: RequestOptions(path: regularPath),
+            response: Response<void>(
+              requestOptions: RequestOptions(path: regularPath),
+              statusCode: 404,
+            ),
+            type: DioExceptionType.badResponse,
+          ),
+        );
+        when(
+          () => client.getJson<dynamic>(protectedPath),
+        ).thenAnswer((_) async => _jsonResponse<dynamic>(['-']));
+        final repo = InventoryRepository(client: client, db: db);
+        await repo.getNomenclatures();
+
+        final result = await repo.getCharacteristics('Бор Фрезы');
+
+        expect((result as Success<List<String>>).value, ['-']);
+        verify(() => client.getJson<dynamic>(regularPath)).called(1);
+        verify(() => client.getJson<dynamic>(protectedPath)).called(1);
+      },
+    );
+
     test('HTTP 500 по-прежнему → Failure(ServerError)', () async {
       when(() => client.getJson<dynamic>(any())).thenThrow(
         DioException(
@@ -409,6 +537,34 @@ void main() {
         'Номенклатура': 'Монитор',
         'Характеристика': '23,5" Samsung №CWGCH4ZR503628',
       });
+    });
+
+    test('использует исходное имя позиции из ответа /nomen', () async {
+      when(
+        () => client.getJson<dynamic>('hs/inventory/nomen'),
+      ).thenAnswer((_) async => _jsonResponse<dynamic>(['Бор Фрезы ']));
+      when(
+        () => client.postJson<dynamic>(
+          any(),
+          body: any(named: 'body'),
+          receiveTimeout: any(named: 'receiveTimeout'),
+        ),
+      ).thenAnswer((_) async => _okResponse<dynamic>());
+      final repo = InventoryRepository(client: client, db: db);
+      await repo.getNomenclatures();
+
+      await repo.addBarcode('Бор Фрезы', '-');
+
+      final body =
+          verify(
+                () => client.postJson<dynamic>(
+                  'hs/inventory/newBarcode',
+                  body: captureAny(named: 'body'),
+                  receiveTimeout: any(named: 'receiveTimeout'),
+                ),
+              ).captured.single
+              as Map<String, dynamic>;
+      expect(body['Номенклатура'], 'Бор Фрезы ');
     });
 
     test('передаёт увеличенный receiveTimeout (тяжёлая операция 1С)', () async {
