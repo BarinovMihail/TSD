@@ -9,7 +9,12 @@ List<DocTableRow> parseDocTable(Object? json) {
   for (final entry in json.entries) {
     if (entry.value is! Map) continue;
     final f = entry.value as Map;
-    final line = int.tryParse(entry.key.toString()) ?? 0;
+    // Новая версия сервиса возвращает фактический номер строки отдельным
+    // полем. Ключ объекта оставляем fallback-ом для старых ответов /code/.
+    final line =
+        int.tryParse(f['НомерСтроки']?.toString() ?? '') ??
+        int.tryParse(entry.key.toString()) ??
+        0;
     rows.add(
       DocTableRow(
         lineNumber: line,

@@ -109,6 +109,27 @@ class InventoryRepository {
     }
   }
 
+  /// Удалить номенклатурную позицию из табличной части документа.
+  /// DELETE /hs/inventory/Str/{НомерДокумента}/{НомерСтроки}.
+  Future<Result<void>> deleteLine(String docCode, int lineNumber) async {
+    final normalizedDocCode = docCode.trim();
+    if (normalizedDocCode.isEmpty || lineNumber <= 0) {
+      return const Failure(ParseError('Некорректные реквизиты строки'));
+    }
+    final path =
+        'hs/inventory/Str/${Uri.encodeComponent(normalizedDocCode)}'
+        '/${Uri.encodeComponent(lineNumber.toString())}';
+    try {
+      await _client.deleteJson<dynamic>(path);
+      return const Success(null);
+    } on DioException catch (e) {
+      return Failure(ApiError.fromDio(e));
+    } catch (e) {
+      _log.warning('Ошибка удаления строки документа: $e');
+      return const Failure(NetworkError());
+    }
+  }
+
   /// Полный список номенклатурных позиций.
   /// GET /hs/inventory/nomen.
   ///

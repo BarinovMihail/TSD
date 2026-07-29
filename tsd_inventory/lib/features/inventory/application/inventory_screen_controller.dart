@@ -64,6 +64,21 @@ enum DeleteBarcodeOutcome {
   inconclusive,
 }
 
+/// Результат удаления номенклатурной позиции и обновления документа.
+enum DeleteLineOutcome {
+  /// Сервис подтвердил удаление.
+  done,
+
+  /// Сервис вернул HTTP-ошибку — строка не удалена.
+  failed,
+
+  /// Ответ сервиса потерян, но после обновления удалённая строка исчезла.
+  verifiedAfterTimeout,
+
+  /// Ответ сервиса потерян, а фактическое удаление подтвердить не удалось.
+  inconclusive,
+}
+
 class InventoryScreenController extends ChangeNotifier {
   InventoryScreenController({
     required this.docCode,
@@ -350,6 +365,57 @@ class InventoryScreenController extends ChangeNotifier {
     );
   }
 
+  /// Удалить строку документа в 1С и перечитать табличную часть.
+  ///
+  /// При потерянном ответе проверяем удаление свежим запросом /code/: строка
+  /// считается удалённой, если прежней позиции с этим номером больше нет.
+  Future<({DeleteLineOutcome outcome, ApiError? error})> deleteLineAndReload({
+    required DocTableRow row,
+  }) async {
+    final res = await repo.deleteLine(docCode, row.lineNumber);
+
+    if (res is Success) {
+      // Удаляем сохранённый факт до reload: после удаления 1С может
+      // перенумеровать строки, и прогресс старого номера нельзя накладывать
+      // на оказавшуюся на его месте другую позицию.
+      await db.deleteScanProgressLine(docCode, row.lineNumber);
+      // Даже если перечитать документ сейчас не удалось или 1С обновляет
+      // /code/ с задержкой, подтверждённое удаление сразу отражаем локально.
+      await reload();
+      _removeLineLocally(row);
+      return (outcome: DeleteLineOutcome.done, error: null);
+    }
+
+    final err = (res as Failure<void>).error;
+    if (err is! NetworkError) {
+      return (outcome: DeleteLineOutcome.failed, error: err);
+    }
+
+    final reloadRes = await repo.getTable(docCode);
+    final removed =
+        reloadRes is Success<List<DocTableRow>> &&
+        !_containsSameLine(reloadRes.value, row);
+    if (removed) {
+      // Выполняем до hydrateFromDb по той же причине, что и в ветке
+      // подтверждённого ответа: освободившийся номер может занять другая строка.
+      await db.deleteScanProgressLine(docCode, row.lineNumber);
+    }
+    if (reloadRes is Success<List<DocTableRow>>) {
+      final scan = this.scan;
+      if (scan != null) {
+        scan.replaceRows(reloadRes.value);
+        await scan.hydrateFromDb();
+      }
+      notifyListeners();
+    }
+    return (
+      outcome: removed
+          ? DeleteLineOutcome.verifiedAfterTimeout
+          : DeleteLineOutcome.inconclusive,
+      error: null,
+    );
+  }
+
   Future<({AddBarcodeOutcome outcome, ApiError? error})> _finishBarcodeAdd(
     Result<void> res, {
     required bool Function(List<DocTableRow> rows) verifyAfterNetworkError,
@@ -405,6 +471,29 @@ class InventoryScreenController extends ChangeNotifier {
       return row.barcodes.any((value) => value.trim() == barcode);
     }
     return false;
+  }
+
+  bool _containsSameLine(List<DocTableRow> rows, DocTableRow target) {
+    for (final row in rows) {
+      if (_isSameLine(row, target)) return true;
+    }
+    return false;
+  }
+
+  bool _isSameLine(DocTableRow row, DocTableRow target) =>
+      row.lineNumber == target.lineNumber &&
+      row.nomenclatureCode == target.nomenclatureCode &&
+      row.nomenclature == target.nomenclature &&
+      row.characteristic == target.characteristic;
+
+  void _removeLineLocally(DocTableRow target) {
+    final scan = this.scan;
+    if (scan == null) return;
+    scan.replaceRows([
+      for (final row in scan.rows)
+        if (!_isSameLine(row, target)) row,
+    ]);
+    notifyListeners();
   }
 
   void _removeBarcodeLocally({

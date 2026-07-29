@@ -884,6 +884,49 @@ void main() {
     });
   });
 
+  group('deleteLine — DELETE /Str/{документ}/{строка}', () {
+    test('документ и номер строки передаются в URL', () async {
+      when(
+        () => client.deleteJson<dynamic>(any()),
+      ).thenAnswer((_) async => _okResponse<dynamic>());
+      final repo = InventoryRepository(client: client, db: db);
+
+      final res = await repo.deleteLine(' АЕ 1/2 ', 11);
+
+      expect(res, isA<Success>());
+      verify(
+        () => client.deleteJson<dynamic>(
+          'hs/inventory/Str/%D0%90%D0%95%201%2F2/11',
+        ),
+      ).called(1);
+    });
+
+    test('некорректный номер строки не отправляется', () async {
+      final repo = InventoryRepository(client: client, db: db);
+
+      final res = await repo.deleteLine('АЕ-1', 0);
+
+      expect(res, isA<Failure>());
+      expect((res as Failure).error, isA<ParseError>());
+      verifyNever(() => client.deleteJson<dynamic>(any()));
+    });
+
+    test('сетевая ошибка Dio → Failure', () async {
+      when(() => client.deleteJson<dynamic>(any())).thenThrow(
+        DioException(
+          requestOptions: RequestOptions(path: ''),
+          type: DioExceptionType.connectionError,
+        ),
+      );
+      final repo = InventoryRepository(client: client, db: db);
+
+      final res = await repo.deleteLine('АЕ-1', 11);
+
+      expect(res, isA<Failure>());
+      expect((res as Failure).error, isA<NetworkError>());
+    });
+  });
+
   group('deleteBarcode — DELETE /delete/{ШК}', () {
     test('номер штрихкода trim-ится и URL-кодируется', () async {
       when(

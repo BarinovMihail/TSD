@@ -177,6 +177,14 @@ abstract final class AppStrings {
   static const deleteBarcodeInconclusive =
       'Не удалось подтвердить удаление штрихкода';
 
+  // Удаление номенклатурной позиции из документа
+  static const deletePositionTitle = 'Удалить позицию?';
+  static const deletePosition = 'Удалить';
+  static const deletePositionTooltip = 'Удалить позицию';
+  static const positionDeletedSuccess = 'Позиция удалена';
+  static const deletePositionInconclusive =
+      'Не удалось подтвердить удаление позиции';
+
   // Снятие факта сканирования (долгое нажатие на отсканированной позиции)
   static const unscanTitle = 'Управление фактом';
   static const unscanDecrement = 'Убрать единицу (−1)';

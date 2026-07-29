@@ -90,6 +90,16 @@ class AppDatabase extends _$AppDatabase {
     return {for (final r in rows) r.lineNumber: r};
   }
 
+  /// Удаление локального прогресса удалённой строки документа.
+  Future<void> deleteScanProgressLine(String docCode, int lineNo) async {
+    await (delete(scanProgress)
+          ..where(
+            (t) =>
+                t.docCode.equals(docCode) & t.lineNumber.equals(lineNo),
+          ))
+        .go();
+  }
+
   /// Очистка прогресса документа (после успешной отправки).
   Future<void> clearScanProgress(String docCode) async {
     await (delete(scanProgress)..where((t) => t.docCode.equals(docCode))).go();

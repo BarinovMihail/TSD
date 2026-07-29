@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:tsd_inventory/core/feedback/feedback_service.dart';
+import 'package:tsd_inventory/core/result/result.dart';
 import 'package:tsd_inventory/core/storage/app_database.dart';
 import 'package:tsd_inventory/features/auth/application/auth_controller.dart';
 import 'package:tsd_inventory/features/inventory/application/inventory_screen_controller.dart';
@@ -58,6 +59,9 @@ void main() {
         qtyActual: any(named: 'qtyActual'),
         action: any(named: 'action'),
       ),
+    ).thenAnswer((_) async {});
+    when(
+      () => db.deleteScanProgressLine(any(), any()),
     ).thenAnswer((_) async {});
   });
 
@@ -139,6 +143,51 @@ void main() {
       expect(find.text('Номенклатура 2'), findsOneWidget);
     },
   );
+
+  testWidgets('корзина всегда запрашивает подтверждение удаления', (
+    tester,
+  ) async {
+    await tester.pumpWidget(harness());
+    await tester.pump();
+
+    await tester.tap(
+      find.byTooltip(AppStrings.deletePositionTooltip).first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.deletePositionTitle), findsOneWidget);
+    expect(find.text('Номенклатура 1'), findsNWidgets(2));
+
+    await tester.tap(find.text(AppStrings.cancel));
+    await tester.pumpAndSettle();
+    verifyNever(() => repo.deleteLine(any(), any()));
+  });
+
+  testWidgets('подтверждённое удаление убирает позицию из списка', (
+    tester,
+  ) async {
+    when(
+      () => repo.deleteLine('АЕ-1', 1),
+    ).thenAnswer((_) async => const Success(null));
+    when(
+      () => repo.getTable('АЕ-1'),
+    ).thenAnswer((_) async => Success([_row(2)]));
+    await tester.pumpWidget(harness());
+    await tester.pump();
+
+    await tester.tap(
+      find.byTooltip(AppStrings.deletePositionTooltip).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(AppStrings.deletePosition));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    verify(() => repo.deleteLine('АЕ-1', 1)).called(1);
+    expect(find.text('Номенклатура 1'), findsNothing);
+    expect(find.text('Номенклатура 2'), findsOneWidget);
+    expect(find.text(AppStrings.positionDeletedSuccess), findsOneWidget);
+  });
 }
 
 class _FakeAuthController extends AuthController {

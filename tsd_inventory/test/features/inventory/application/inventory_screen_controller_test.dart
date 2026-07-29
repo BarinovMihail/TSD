@@ -88,6 +88,9 @@ void main() {
       ),
     ).thenAnswer((_) async {});
     when(
+      () => db.deleteScanProgressLine(any(), any()),
+    ).thenAnswer((_) async {});
+    when(
       () => repo.getBarcodeAssignment(any()),
     ).thenAnswer((_) async => const Success(null));
   });
@@ -670,5 +673,84 @@ void main() {
 
       expect(r.outcome, DeleteBarcodeOutcome.inconclusive);
     });
+  });
+
+  group('deleteLineAndReload', () {
+    test('передаёт документ и номер строки, затем удаляет строку локально', (
+      ) async {
+        when(
+          () => repo.deleteLine(any(), any()),
+        ).thenAnswer((_) async => const Success(null));
+        when(
+          () => repo.getTable(any()),
+        ).thenAnswer((_) async => const Success(<DocTableRow>[]));
+        final row = _row(lineNumber: 11);
+        final ctrl = _controller(repo, db, feedback, row);
+
+        final result = await ctrl.deleteLineAndReload(row: row);
+
+        expect(result.outcome, DeleteLineOutcome.done);
+        verify(() => repo.deleteLine('АЕ-1', 11)).called(1);
+        verify(() => db.deleteScanProgressLine('АЕ-1', 11)).called(1);
+        expect(ctrl.scan!.rows, isEmpty);
+      });
+
+    test('после сетевой ошибки исчезновение строки подтверждает удаление', (
+      ) async {
+        when(
+          () => repo.deleteLine(any(), any()),
+        ).thenAnswer((_) async => const Failure(NetworkError()));
+        when(
+          () => repo.getTable(any()),
+        ).thenAnswer((_) async => const Success(<DocTableRow>[]));
+        final row = _row(lineNumber: 11);
+        final ctrl = _controller(repo, db, feedback, row);
+
+        final result = await ctrl.deleteLineAndReload(row: row);
+
+        expect(result.outcome, DeleteLineOutcome.verifiedAfterTimeout);
+        verify(() => db.deleteScanProgressLine('АЕ-1', 11)).called(1);
+        expect(ctrl.scan!.rows, isEmpty);
+      });
+
+    test('перенумерованная после удаления другая позиция сохраняется', (
+      ) async {
+        when(
+          () => repo.deleteLine(any(), any()),
+        ).thenAnswer((_) async => const Success(null));
+        final deleted = _row(lineNumber: 11, nomenclature: 'Линейка');
+        final remaining = _row(
+          lineNumber: 11,
+          nomenclature: 'Корпус',
+          nomenclatureCode: '618810',
+        );
+        when(
+          () => repo.getTable(any()),
+        ).thenAnswer((_) async => Success([remaining]));
+        final ctrl = _controller(repo, db, feedback, deleted);
+
+        final result = await ctrl.deleteLineAndReload(row: deleted);
+
+        expect(result.outcome, DeleteLineOutcome.done);
+        expect(ctrl.scan!.rows.single.nomenclature, 'Корпус');
+      });
+
+    test('оставшаяся после сетевой ошибки позиция не считается удалённой', (
+      ) async {
+        when(
+          () => repo.deleteLine(any(), any()),
+        ).thenAnswer((_) async => const Failure(NetworkError()));
+        final row = _row(lineNumber: 11);
+        when(
+          () => repo.getTable(any()),
+        ).thenAnswer((_) async => Success([row]));
+        final ctrl = _controller(repo, db, feedback, row);
+
+        final result = await ctrl.deleteLineAndReload(row: row);
+
+        expect(result.outcome, DeleteLineOutcome.inconclusive);
+        verifyNever(() => db.deleteScanProgressLine(any(), any()));
+        expect(ctrl.scan!.rows, hasLength(1));
+      });
   });
 }

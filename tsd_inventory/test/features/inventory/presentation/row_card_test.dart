@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tsd_inventory/features/inventory/domain/doc_table_row.dart';
 import 'package:tsd_inventory/features/inventory/presentation/row_card.dart';
+import 'package:tsd_inventory/l10n/app_strings.dart';
 
 DocTableRow _row({
   List<String> barcodes = const [],
@@ -194,5 +195,32 @@ void main() {
     await tester.pumpWidget(wrap(RowCard(row: _row(barcodes: const ['111']))));
     await tester.pump();
     expect(find.byType(IconButton), findsNothing);
+  });
+
+  testWidgets('корзина отображается под иконкой ШК и вызывает удаление', (
+    tester,
+  ) async {
+    var deleted = false;
+    await tester.pumpWidget(
+      wrap(
+        RowCard(
+          row: _row(barcodes: const ['111']),
+          onTapBarcode: () {},
+          onDelete: () => deleted = true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final barcodeButton = find.byType(IconButton).first;
+    final deleteButton = find.byTooltip(AppStrings.deletePositionTooltip);
+    expect(deleteButton, findsOneWidget);
+    expect(
+      tester.getTopLeft(deleteButton).dy,
+      greaterThan(tester.getTopLeft(barcodeButton).dy),
+    );
+
+    await tester.tap(deleteButton);
+    expect(deleted, true);
   });
 }

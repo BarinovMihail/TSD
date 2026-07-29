@@ -15,7 +15,7 @@ class DocTableRow {
     List<String> barcodes = const [],
   }) : barcodes = List<String>.unmodifiable(barcodes);
 
-  final int lineNumber; // ключ "1","2" → int
+  final int lineNumber; // НомерСтроки; ключ объекта — fallback старого API
   final String inventoryNumber; // "44182" или ""
   final String nomenclature; // человекочитаемый текст
   final String nomenclatureCode; // НоменклатураКод

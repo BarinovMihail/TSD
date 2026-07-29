@@ -29,6 +29,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   late final KeyboardWedgeScanner _scanner;
   final _scanFocus = FocusNode();
   Completer<String>? _barcodeCapture;
+  final Set<int> _deletingLineNumbers = {};
 
   @override
   void initState() {
@@ -447,6 +448,112 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     );
   }
 
+  Future<void> _confirmDeleteLine(DocTableRow row) async {
+    if (_deletingLineNumbers.contains(row.lineNumber)) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final scheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          title: const Text(AppStrings.deletePositionTitle),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                row.nomenclature,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              if (row.characteristic.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    row.characteristic,
+                    style: TextStyle(color: scheme.outline),
+                  ),
+                ),
+            ],
+          ),
+          actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+          actions: [
+            SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FilledButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(56),
+                      backgroundColor: scheme.error,
+                      foregroundColor: scheme.onError,
+                    ),
+                    child: const Text(AppStrings.deletePosition),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(56),
+                    ),
+                    child: const Text(AppStrings.cancel),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    if (!mounted || confirmed != true) return;
+    await _deleteLine(row);
+  }
+
+  Future<void> _deleteLine(DocTableRow row) async {
+    if (_deletingLineNumbers.contains(row.lineNumber)) return;
+    setState(() => _deletingLineNumbers.add(row.lineNumber));
+    final ctrl = ref.read(
+      inventoryScreenControllerProvider(widget.docCode),
+    );
+    final result = await ctrl.deleteLineAndReload(row: row);
+    if (!mounted) return;
+    setState(() => _deletingLineNumbers.remove(row.lineNumber));
+
+    switch (result.outcome) {
+      case DeleteLineOutcome.done:
+      case DeleteLineOutcome.verifiedAfterTimeout:
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text(AppStrings.positionDeletedSuccess),
+            backgroundColor: Theme.of(context).colorScheme.secondary,
+          ),
+        );
+      case DeleteLineOutcome.failed:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.error?.userMessage ?? AppStrings.errGeneric),
+            action: SnackBarAction(
+              label: AppStrings.retry,
+              onPressed: () => _deleteLine(row),
+            ),
+          ),
+        );
+      case DeleteLineOutcome.inconclusive:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(AppStrings.deletePositionInconclusive),
+            action: SnackBarAction(
+              label: AppStrings.retry,
+              onPressed: () => _deleteLine(row),
+            ),
+          ),
+        );
+    }
+  }
+
   Future<void> _finish() async {
     final scan = _scan;
     if (scan == null) return;
@@ -591,6 +698,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                 ctrl: ctrl,
                 onUnscan: _showUnscanDialog,
                 onTapBarcode: _openBarcodeDialog,
+                onDelete: _confirmDeleteLine,
+                deletingLineNumbers: _deletingLineNumbers,
               ),
             ),
       bottomNavigationBar: SafeArea(
@@ -698,6 +807,8 @@ class _Body extends ConsumerWidget {
     required this.ctrl,
     required this.onUnscan,
     required this.onTapBarcode,
+    required this.onDelete,
+    required this.deletingLineNumbers,
   });
   final InventoryScreenController ctrl;
 
@@ -706,6 +817,12 @@ class _Body extends ConsumerWidget {
 
   /// Тап по иконке штрихкода → окно добавления/просмотра штрихкодов.
   final void Function(DocTableRow row) onTapBarcode;
+
+  /// Тап по корзине → обязательное подтверждение удаления позиции.
+  final void Function(DocTableRow row) onDelete;
+
+  /// Строки, для которых запрос удаления уже выполняется.
+  final Set<int> deletingLineNumbers;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -803,6 +920,9 @@ class _Body extends ConsumerWidget {
                 row: rows[i],
                 // Иконка штрихкода всегда активна (добавить/посмотреть).
                 onTapBarcode: () => onTapBarcode(rows[i]),
+                // Корзина находится под иконкой ШК.
+                onDelete: () => onDelete(rows[i]),
+                deleting: deletingLineNumbers.contains(rows[i].lineNumber),
                 // Long-press доступен только для отсканированных позиций.
                 onLongPress: rows[i].isFound ? () => onUnscan(rows[i]) : null,
               ),

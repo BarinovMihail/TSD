@@ -9,6 +9,8 @@ class RowCard extends StatelessWidget {
     required this.row,
     this.onLongPress,
     this.onTapBarcode,
+    this.onDelete,
+    this.deleting = false,
   });
   final DocTableRow row;
 
@@ -19,6 +21,12 @@ class RowCard extends StatelessWidget {
   /// Нажатие на иконку штрихкода: открывает окно добавления (нет штрихкодов)
   /// или просмотра (есть штрихкоды). Иконка-кнопка в шапке строки.
   final VoidCallback? onTapBarcode;
+
+  /// Удаление номенклатурной позиции из документа.
+  final VoidCallback? onDelete;
+
+  /// Показывает прогресс вместо корзины и блокирует повторное удаление.
+  final bool deleting;
 
   @override
   Widget build(BuildContext context) {
@@ -54,34 +62,74 @@ class RowCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (onTapBarcode != null)
-                  // Иконка-кнопка состояния штрихкодов позиции:
-                  // barcode_available.png — есть штрихкоды,
-                  // barcode_missing.png — нет штрихкодов.
-                  IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 40,
-                      minHeight: 40,
-                    ),
-                    style: IconButton.styleFrom(
-                      backgroundColor: scheme.surface,
-                      side: BorderSide(
-                        color: found ? scheme.secondary : scheme.outlineVariant,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    icon: Image.asset(
-                      'assets/icons/barcode_${row.hasBarcodes ? 'available' : 'missing'}.png',
-                      width: 28,
-                      height: 28,
-                    ),
-                    onPressed: onTapBarcode,
-                    tooltip: row.hasBarcodes
-                        ? AppStrings.viewBarcodesTitle
-                        : AppStrings.addBarcodeTitle,
+                if (onTapBarcode != null || onDelete != null)
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (onTapBarcode != null)
+                        // Иконка-кнопка состояния штрихкодов позиции:
+                        // barcode_available.png — есть штрихкоды,
+                        // barcode_missing.png — нет штрихкодов.
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 40,
+                            minHeight: 40,
+                          ),
+                          style: IconButton.styleFrom(
+                            backgroundColor: scheme.surface,
+                            side: BorderSide(
+                              color: found
+                                  ? scheme.secondary
+                                  : scheme.outlineVariant,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          icon: Image.asset(
+                            'assets/icons/barcode_${row.hasBarcodes ? 'available' : 'missing'}.png',
+                            width: 28,
+                            height: 28,
+                          ),
+                          onPressed: onTapBarcode,
+                          tooltip: row.hasBarcodes
+                              ? AppStrings.viewBarcodesTitle
+                              : AppStrings.addBarcodeTitle,
+                        ),
+                      if (onTapBarcode != null && onDelete != null)
+                        const SizedBox(height: 6),
+                      if (onDelete != null)
+                        deleting
+                            ? const SizedBox(
+                                width: 40,
+                                height: 40,
+                                child: Padding(
+                                  padding: EdgeInsets.all(10),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              )
+                            : IconButton(
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                  minWidth: 40,
+                                  minHeight: 40,
+                                ),
+                                style: IconButton.styleFrom(
+                                  foregroundColor: scheme.error,
+                                  backgroundColor: scheme.surface,
+                                  side: BorderSide(color: scheme.error),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: onDelete,
+                                tooltip: AppStrings.deletePositionTooltip,
+                              ),
+                    ],
                   ),
               ],
             ),
