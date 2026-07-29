@@ -66,15 +66,32 @@ class UnknownBarcodePromptDialog extends StatelessWidget {
     return AlertDialog(
       title: const Text(AppStrings.unknownBarcodeTitle),
       content: Text(AppStrings.unknownBarcodeMessage(barcode)),
+      actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text(AppStrings.cancel),
-        ),
-        FilledButton.tonalIcon(
-          onPressed: () => Navigator.of(context).pop(true),
-          icon: const Icon(Icons.add),
-          label: const Text(AppStrings.createNomenclatureFromBarcode),
+        SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(56),
+                ),
+                icon: const Icon(Icons.add),
+                label: const Text(AppStrings.createNomenclatureFromBarcode),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(56),
+                ),
+                child: const Text(AppStrings.cancel),
+              ),
+            ],
+          ),
         ),
       ],
     );
