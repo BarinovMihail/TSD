@@ -158,14 +158,31 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
             characteristic: assignment.characteristic,
           ),
         ),
+        actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text(AppStrings.cancel),
-          ),
-          FilledButton.tonal(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text(AppStrings.addToDocument),
+          SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(56),
+                  ),
+                  child: const Text(AppStrings.addToDocument),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(56),
+                  ),
+                  child: const Text(AppStrings.cancel),
+                ),
+              ],
+            ),
           ),
         ],
       ),
