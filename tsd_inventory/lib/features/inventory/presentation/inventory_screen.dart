@@ -13,9 +13,13 @@ import '../application/inventory_screen_controller.dart';
 import '../application/scan_controller.dart';
 import '../domain/barcode_assignment.dart';
 import '../domain/doc_table_row.dart';
+import 'barcode_capture_dialog.dart';
 import 'barcode_dialog.dart';
-import 'row_card.dart';
+import 'inventory_body.dart';
+import 'inventory_dialogs.dart';
 import 'unknown_barcode_dialog.dart';
+
+export 'barcode_capture_dialog.dart' show BarcodeCaptureDialog;
 
 class InventoryScreen extends ConsumerStatefulWidget {
   const InventoryScreen({super.key, required this.docCode});
@@ -103,9 +107,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   }
 
   Future<void> _resolveNotFoundBarcode(String code) async {
-    final ctrl = ref.read(
-      inventoryScreenControllerProvider(widget.docCode),
-    );
+    final ctrl = ref.read(inventoryScreenControllerProvider(widget.docCode));
     final lookup = await ctrl.repo.getBarcodeAssignment(code);
     if (!mounted) return;
     if (lookup is Failure<BarcodeAssignment?>) {
@@ -149,43 +151,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   ) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text(AppStrings.addPositionToDocumentTitle),
-        content: Text(
-          AppStrings.addPositionToDocumentMessage(
-            barcode: code,
-            nomenclature: assignment.nomenclature,
-            characteristic: assignment.characteristic,
-          ),
-        ),
-        actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-        actions: [
-          SizedBox(
-            width: double.maxFinite,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FilledButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(true),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(56),
-                  ),
-                  child: const Text(AppStrings.addToDocument),
-                ),
-                const SizedBox(height: 10),
-                OutlinedButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(false),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(56),
-                  ),
-                  child: const Text(AppStrings.cancel),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+      builder: (context) =>
+          AddPositionToDocumentDialog(barcode: code, assignment: assignment),
     );
     if (!mounted || confirmed != true) return;
     await _addMissingLine(assignment);
@@ -243,34 +210,16 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     try {
       final shouldCreate = await showDialog<bool>(
         context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text(AppStrings.unknownBarcodeTitle),
-          content: Text(AppStrings.unknownBarcodeMessage(normalized)),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text(AppStrings.cancel),
-            ),
-            FilledButton.tonalIcon(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              icon: const Icon(Icons.add),
-              label: const Text(AppStrings.createNomenclatureFromBarcode),
-            ),
-          ],
-        ),
+        builder: (context) => UnknownBarcodePromptDialog(barcode: normalized),
       );
       if (!mounted || shouldCreate != true) return;
 
-      final ctrl = ref.read(
-        inventoryScreenControllerProvider(widget.docCode),
-      );
+      final ctrl = ref.read(inventoryScreenControllerProvider(widget.docCode));
       await showDialog<bool>(
         context: context,
         barrierDismissible: false,
-        builder: (dialogContext) => UnknownBarcodeDialog(
-          barcode: normalized,
-          ctrl: ctrl,
-        ),
+        builder: (dialogContext) =>
+            UnknownBarcodeDialog(barcode: normalized, ctrl: ctrl),
       );
     } finally {
       if (mounted) {
@@ -333,46 +282,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   void _showAmbiguous(List<DocTableRow> candidates) {
     showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text(AppStrings.multipleMatches),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: candidates.length,
-            itemBuilder: (ctx, i) {
-              final r = candidates[i];
-              return ListTile(
-                title: Text(r.nomenclature),
-                subtitle: Text(_ambiguousSubTitle(r)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _scan?.applyChoice(r);
-                },
-              );
-            },
-          ),
-        ),
-        actions: [
-          // Отмена на всю ширину (outline) — единственное действие.
-          OutlinedButton(
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size.fromHeight(56),
-            ),
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text(AppStrings.cancel),
-          ),
-        ],
+      builder: (context) => AmbiguousBarcodeDialog(
+        candidates: candidates,
+        onSelected: (row) => _scan?.applyChoice(row),
       ),
     );
-  }
-
-  /// Подпись строки в списке неоднозначных совпадений: инв. номер и
-  /// характеристика (чтобы различить одинаковые позиции по характеристике).
-  String _ambiguousSubTitle(DocTableRow r) {
-    final char = r.characteristic.trim();
-    final inv = 'Инв. ${r.inventoryNumber}';
-    return char.isEmpty ? inv : '$inv | $char';
   }
 
   /// Диалог снятия факта сканирования позиции (долгое нажатие по карточке,
@@ -380,88 +294,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   void _showUnscanDialog(DocTableRow row) {
     showDialog<void>(
       context: context,
-      builder: (ctx) {
-        final scheme = Theme.of(ctx).colorScheme;
-        return AlertDialog(
-          title: Text(AppStrings.unscanTitle),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                row.nomenclature,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              if (row.characteristic.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(
-                    row.characteristic,
-                    style: TextStyle(color: scheme.outline),
-                  ),
-                ),
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  AppStrings.qtyActualOf(row.qtyActual),
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Primary (безопасное) — убрать одну единицу (заполненная, сверху).
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(60),
-                    textStyle: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _scan?.decrementActual(row);
-                  },
-                  child: const Text(AppStrings.unscanDecrement),
-                ),
-                const SizedBox(height: 12),
-                // Деструктивное — сброс факта в 0 (outline, красная).
-                OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(56),
-                    foregroundColor: scheme.error,
-                    side: BorderSide(color: scheme.error),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _scan?.resetActual(row);
-                  },
-                  child: const Text(AppStrings.unscanReset),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(56),
-                  ),
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text(AppStrings.cancel),
-                ),
-              ],
-            ),
-          ],
-        );
-      },
+      builder: (context) => UnscanDialog(
+        row: row,
+        onDecrement: () => _scan?.decrementActual(row),
+        onReset: () => _scan?.resetActual(row),
+      ),
     );
   }
 
@@ -469,59 +306,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     if (_deletingLineNumbers.contains(row.lineNumber)) return;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) {
-        final scheme = Theme.of(dialogContext).colorScheme;
-        return AlertDialog(
-          title: const Text(AppStrings.deletePositionTitle),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                row.nomenclature,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              if (row.characteristic.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    row.characteristic,
-                    style: TextStyle(color: scheme.outline),
-                  ),
-                ),
-            ],
-          ),
-          actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-          actions: [
-            SizedBox(
-              width: double.maxFinite,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  FilledButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(true),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(56),
-                      backgroundColor: scheme.error,
-                      foregroundColor: scheme.onError,
-                    ),
-                    child: const Text(AppStrings.deletePosition),
-                  ),
-                  const SizedBox(height: 10),
-                  OutlinedButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(false),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(56),
-                    ),
-                    child: const Text(AppStrings.cancel),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        );
-      },
+      builder: (context) => DeletePositionDialog(row: row),
     );
     if (!mounted || confirmed != true) return;
     await _deleteLine(row);
@@ -530,9 +315,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   Future<void> _deleteLine(DocTableRow row) async {
     if (_deletingLineNumbers.contains(row.lineNumber)) return;
     setState(() => _deletingLineNumbers.add(row.lineNumber));
-    final ctrl = ref.read(
-      inventoryScreenControllerProvider(widget.docCode),
-    );
+    final ctrl = ref.read(inventoryScreenControllerProvider(widget.docCode));
     final result = await ctrl.deleteLineAndReload(row: row);
     if (!mounted) return;
     setState(() => _deletingLineNumbers.remove(row.lineNumber));
@@ -711,8 +494,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
               focusNode: _scanFocus,
               onKeyEvent: _scanner.handleKeyEvent,
               autofocus: true,
-              child: _Body(
-                ctrl: ctrl,
+              child: InventoryBody(
+                controller: ctrl,
                 onUnscan: _showUnscanDialog,
                 onTapBarcode: _openBarcodeDialog,
                 onDelete: _confirmDeleteLine,
@@ -731,222 +514,6 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
           ),
         ),
       ),
-    );
-  }
-}
-
-class BarcodeCaptureDialog extends StatefulWidget {
-  const BarcodeCaptureDialog({
-    required this.row,
-    required this.codeFuture,
-    required this.scanner,
-  });
-
-  final DocTableRow row;
-  final Future<String> codeFuture;
-  final KeyboardWedgeScanner scanner;
-
-  @override
-  State<BarcodeCaptureDialog> createState() => _BarcodeCaptureDialogState();
-}
-
-class _BarcodeCaptureDialogState extends State<BarcodeCaptureDialog> {
-  final _focusNode = FocusNode(debugLabel: 'barcode-capture');
-
-  @override
-  void initState() {
-    super.initState();
-    widget.codeFuture.then((code) {
-      if (mounted) Navigator.of(context).pop(code);
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focusNode.requestFocus();
-    });
-  }
-
-  @override
-  void dispose() {
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Focus(
-      focusNode: _focusNode,
-      autofocus: true,
-      onKeyEvent: widget.scanner.handleKeyEvent,
-      child: AlertDialog(
-        title: const Text(AppStrings.scanBarcodeTitle),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              widget.row.nomenclature,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-            if (widget.row.characteristic.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(widget.row.characteristic),
-              ),
-            const SizedBox(height: 16),
-            const Row(
-              children: [
-                SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                SizedBox(width: 12),
-                Expanded(child: Text(AppStrings.scanBarcodePrompt)),
-              ],
-            ),
-          ],
-        ),
-        actions: [
-          OutlinedButton(
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size.fromHeight(56),
-            ),
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text(AppStrings.cancel),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Body extends ConsumerWidget {
-  const _Body({
-    required this.ctrl,
-    required this.onUnscan,
-    required this.onTapBarcode,
-    required this.onDelete,
-    required this.deletingLineNumbers,
-  });
-  final InventoryScreenController ctrl;
-
-  /// Долгое нажатие по отсканированной позиции → диалог снятия факта.
-  final void Function(DocTableRow row) onUnscan;
-
-  /// Тап по иконке штрихкода → окно добавления/просмотра штрихкодов.
-  final void Function(DocTableRow row) onTapBarcode;
-
-  /// Тап по корзине → обязательное подтверждение удаления позиции.
-  final void Function(DocTableRow row) onDelete;
-
-  /// Строки, для которых запрос удаления уже выполняется.
-  final Set<int> deletingLineNumbers;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // Слушаем ctrl (он перенаправляет notifyListeners от ScanController).
-    ref.watch(inventoryScreenControllerProvider(ctrl.docCode));
-
-    final scan = ctrl.scan!;
-
-    // Фильтр + сортировка.
-    var rows = List<DocTableRow>.from(scan.rows);
-    // Фильтр «Только без штрихкода»: только строки без штрихкодов.
-    // Данные и прогресс сканирования не меняет.
-    if (ctrl.onlyWithoutBarcode) {
-      rows = rows.where((r) => r.barcodes.isEmpty).toList();
-    }
-    final q = ctrl.searchQuery.toLowerCase();
-    if (q.isNotEmpty) {
-      rows = rows.where((r) {
-        return r.nomenclature.toLowerCase().contains(q) ||
-            r.inventoryNumber.toLowerCase().contains(q) ||
-            r.nomenclatureCode.toLowerCase().contains(q);
-      }).toList();
-    }
-    rows.sort((a, b) {
-      if (ctrl.unscannedFirst) {
-        final af = a.isFound ? 1 : 0;
-        final bf = b.isFound ? 1 : 0;
-        if (af != bf) return af - bf;
-      }
-      return a.lineNumber.compareTo(b.lineNumber);
-    });
-
-    return Column(
-      children: [
-        // Прогресс.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  AppStrings.scannedProgressOf(scan.scannedCount, scan.total),
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-          child: LinearProgressIndicator(
-            value: scan.total == 0 ? 0 : scan.scannedCount / scan.total,
-            minHeight: 10,
-          ),
-        ),
-        // Фильтр.
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: TextField(
-            decoration: const InputDecoration(labelText: AppStrings.search),
-            onChanged: ctrl.setSearch,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                FilterChip(
-                  label: const Text(AppStrings.sortUnscannedFirst),
-                  selected: ctrl.unscannedFirst,
-                  onSelected: ctrl.toggleSort,
-                ),
-                const SizedBox(width: 8),
-                FilterChip(
-                  label: const Text(AppStrings.onlyWithoutBarcode),
-                  selected: ctrl.onlyWithoutBarcode,
-                  onSelected: ctrl.toggleOnlyWithoutBarcode,
-                ),
-              ],
-            ),
-          ),
-        ),
-        // Список строк + pull-to-refresh.
-        Expanded(
-          child: RefreshIndicator(
-            onRefresh: () async => ctrl.reload(),
-            child: ListView.builder(
-              itemCount: rows.length,
-              itemBuilder: (context, i) => RowCard(
-                row: rows[i],
-                // Иконка штрихкода всегда активна (добавить/посмотреть).
-                onTapBarcode: () => onTapBarcode(rows[i]),
-                // Корзина находится под иконкой ШК.
-                onDelete: () => onDelete(rows[i]),
-                deleting: deletingLineNumbers.contains(rows[i].lineNumber),
-                // Long-press доступен только для отсканированных позиций.
-                onLongPress: rows[i].isFound ? () => onUnscan(rows[i]) : null,
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

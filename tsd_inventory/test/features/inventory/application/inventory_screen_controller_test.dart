@@ -75,9 +75,7 @@ void main() {
     feedback = _MockFeedback();
     registerFallbackValue('');
     when(() => feedback.success()).thenAnswer((_) async {});
-    when(
-      () => db.getScanProgress(any()),
-    ).thenAnswer((_) async => <int, ScanProgressData>{});
+    when(() => db.getScanProgress(any())).thenAnswer((_) async => <int, ScanProgressData>{});
     when(
       () => db.upsertScanProgress(
         docCode: any(named: 'docCode'),
@@ -87,18 +85,12 @@ void main() {
         action: any(named: 'action'),
       ),
     ).thenAnswer((_) async {});
-    when(
-      () => db.deleteScanProgressLine(any(), any()),
-    ).thenAnswer((_) async {});
-    when(
-      () => repo.getBarcodeAssignment(any()),
-    ).thenAnswer((_) async => const Success(null));
+    when(() => db.deleteScanProgressLine(any(), any())).thenAnswer((_) async {});
+    when(() => repo.getBarcodeAssignment(any())).thenAnswer((_) async => const Success(null));
   });
 
   test('reload сохраняет серверный факт при локальной записи с нулём', () async {
-    when(() => repo.getTable('АЕ-1')).thenAnswer(
-      (_) async => Success([_row(qtyActual: 3)]),
-    );
+    when(() => repo.getTable('АЕ-1')).thenAnswer((_) async => Success([_row(qtyActual: 3)]));
     when(() => db.getScanProgress('АЕ-1')).thenAnswer(
       (_) async => {
         1: ScanProgressData(
@@ -119,20 +111,51 @@ void main() {
     expect(ctrl.scan!.rows.single.qtyActual, 3);
   });
 
+  group('visibleRows', () {
+    test('применяет поиск и не меняет исходный порядок строк', () {
+      final ctrl = _controller(repo, db, feedback, _row());
+      ctrl.scan!.replaceRows([
+        _row(lineNumber: 3, nomenclature: 'Клавиатура'),
+        _row(lineNumber: 1, nomenclature: 'Монитор'),
+        _row(lineNumber: 2, nomenclature: 'Принтер'),
+      ]);
+      ctrl.searchQuery = 'МОНИ';
+
+      expect(ctrl.visibleRows.map((row) => row.lineNumber), [1]);
+      expect(ctrl.scan!.rows.map((row) => row.lineNumber), [3, 1, 2]);
+    });
+
+    test('фильтрует строки без штрихкода', () {
+      final ctrl = _controller(repo, db, feedback, _row());
+      ctrl.scan!.replaceRows([
+        _row(lineNumber: 1, barcodes: const ['111']),
+        _row(lineNumber: 2),
+      ]);
+      ctrl.onlyWithoutBarcode = true;
+
+      expect(ctrl.visibleRows.map((row) => row.lineNumber), [2]);
+    });
+
+    test('сначала сортирует неотсканированные, затем по номеру строки', () {
+      final ctrl = _controller(repo, db, feedback, _row());
+      ctrl.scan!.replaceRows([
+        _row(lineNumber: 3),
+        _row(lineNumber: 1, qtyActual: 1),
+        _row(lineNumber: 2),
+      ]);
+
+      expect(ctrl.visibleRows.map((row) => row.lineNumber), [2, 3, 1]);
+
+      ctrl.unscannedFirst = false;
+      expect(ctrl.visibleRows.map((row) => row.lineNumber), [1, 2, 3]);
+    });
+  });
+
   group('addBarcodeAndReload', () {
     test('POST успешен → done, документ перезагружен', () async {
-      when(
-        () => repo.addBarcode(any(), any()),
-      ).thenAnswer((_) async => const Success(null));
-      when(
-        () => repo.getTable(any()),
-      ).thenAnswer((_) async => const Success([]));
-      final ctrl = _controller(
-        repo,
-        db,
-        feedback,
-        _row(barcodes: const ['111']),
-      );
+      when(() => repo.addBarcode(any(), any())).thenAnswer((_) async => const Success(null));
+      when(() => repo.getTable(any())).thenAnswer((_) async => const Success([]));
+      final ctrl = _controller(repo, db, feedback, _row(barcodes: const ['111']));
 
       final r = await ctrl.addBarcodeAndReload(
         nomenclature: 'Монитор',
@@ -164,43 +187,33 @@ void main() {
       verifyNever(() => repo.getTable(any()));
     });
 
-    test(
-      'таймаут POST, но штрихкод появился в перезагрузке → verifiedAfterTimeout',
-      () async {
-        when(
-          () => repo.addBarcode(any(), any()),
-        ).thenAnswer((_) async => const Failure(NetworkError()));
-        // 1С успела записать — новый штрихкод в обновлённых данных.
-        when(() => repo.getTable(any())).thenAnswer(
-          (_) async => Success([
-            _row(barcodes: const ['111', 'NEW']),
-          ]),
-        );
-        final ctrl = _controller(
-          repo,
-          db,
-          feedback,
-          _row(barcodes: const ['111']),
-        );
+    test('таймаут POST, но штрихкод появился в перезагрузке → verifiedAfterTimeout', () async {
+      when(
+        () => repo.addBarcode(any(), any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      // 1С успела записать — новый штрихкод в обновлённых данных.
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([
+          _row(barcodes: const ['111', 'NEW']),
+        ]),
+      );
+      final ctrl = _controller(repo, db, feedback, _row(barcodes: const ['111']));
 
-        final r = await ctrl.addBarcodeAndReload(
-          nomenclature: 'Монитор',
-          characteristic: 'Black',
-          prevBarcodes: const {'111'},
-        );
+      final r = await ctrl.addBarcodeAndReload(
+        nomenclature: 'Монитор',
+        characteristic: 'Black',
+        prevBarcodes: const {'111'},
+      );
 
-        expect(r.outcome, AddBarcodeOutcome.verifiedAfterTimeout);
-        verify(() => repo.getTable('АЕ-1')).called(1);
-      },
-    );
+      expect(r.outcome, AddBarcodeOutcome.verifiedAfterTimeout);
+      verify(() => repo.getTable('АЕ-1')).called(1);
+    });
 
     test('таймаут POST и перезагрузка тоже упала → inconclusive', () async {
       when(
         () => repo.addBarcode(any(), any()),
       ).thenAnswer((_) async => const Failure(NetworkError()));
-      when(
-        () => repo.getTable(any()),
-      ).thenAnswer((_) async => const Failure(NetworkError()));
+      when(() => repo.getTable(any())).thenAnswer((_) async => const Failure(NetworkError()));
       final ctrl = _controller(repo, db, feedback, _row());
 
       final r = await ctrl.addBarcodeAndReload(
@@ -212,34 +225,26 @@ void main() {
       expect(r.outcome, AddBarcodeOutcome.inconclusive);
     });
 
-    test(
-      'таймаут POST, штрихкод не появился (те же данные) → inconclusive',
-      () async {
-        when(
-          () => repo.addBarcode(any(), any()),
-        ).thenAnswer((_) async => const Failure(NetworkError()));
-        // Перезагрузка успешна, но штрихкода в данных нет.
-        when(() => repo.getTable(any())).thenAnswer(
-          (_) async => Success([
-            _row(barcodes: const ['111']),
-          ]),
-        );
-        final ctrl = _controller(
-          repo,
-          db,
-          feedback,
+    test('таймаут POST, штрихкод не появился (те же данные) → inconclusive', () async {
+      when(
+        () => repo.addBarcode(any(), any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      // Перезагрузка успешна, но штрихкода в данных нет.
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([
           _row(barcodes: const ['111']),
-        );
+        ]),
+      );
+      final ctrl = _controller(repo, db, feedback, _row(barcodes: const ['111']));
 
-        final r = await ctrl.addBarcodeAndReload(
-          nomenclature: 'Монитор',
-          characteristic: 'Black',
-          prevBarcodes: const {'111'},
-        );
+      final r = await ctrl.addBarcodeAndReload(
+        nomenclature: 'Монитор',
+        characteristic: 'Black',
+        prevBarcodes: const {'111'},
+      );
 
-        expect(r.outcome, AddBarcodeOutcome.inconclusive);
-      },
-    );
+      expect(r.outcome, AddBarcodeOutcome.inconclusive);
+    });
   });
 
   group('addScannedBarcodeAndReload', () {
@@ -247,9 +252,7 @@ void main() {
       when(
         () => repo.addScannedBarcode(any(), any(), any()),
       ).thenAnswer((_) async => const Success(null));
-      when(
-        () => repo.getTable(any()),
-      ).thenAnswer((_) async => const Success([]));
+      when(() => repo.getTable(any())).thenAnswer((_) async => const Success([]));
       final ctrl = _controller(repo, db, feedback, _row());
 
       final r = await ctrl.addScannedBarcodeAndReload(
@@ -260,13 +263,7 @@ void main() {
       );
 
       expect(r.outcome, AddBarcodeOutcome.done);
-      verify(
-        () => repo.addScannedBarcode(
-          'Монитор',
-          'Black',
-          '0012345678905',
-        ),
-      ).called(1);
+      verify(() => repo.addScannedBarcode('Монитор', 'Black', '0012345678905')).called(1);
       verify(() => repo.getTable('АЕ-1')).called(1);
     });
 
@@ -346,53 +343,37 @@ void main() {
       expect(r.outcome, AddBarcodeOutcome.inconclusive);
     });
 
-    test(
-      'ошибка POST не показывается, если регистр подтверждает ту же позицию',
-      () async {
-        when(
-          () => repo.addScannedBarcode(any(), any(), any()),
-        ).thenAnswer((_) async => const Failure(ServerError(code: 500)));
-        when(() => repo.getBarcodeAssignment('460123')).thenAnswer(
-          (_) async => const Success(
-            BarcodeAssignment(
-              nomenclature: '015.020.063.00052 Седло',
-              characteristic: '',
-            ),
-          ),
-        );
-        when(
-          () => repo.getTable(any()),
-        ).thenAnswer(
-          (_) async => Success([
-            _row(
-              nomenclature: 'Седло',
-              nomenclatureCode: '015.020.063.00052',
-              characteristic: '',
-            ),
-          ]),
-        );
-        final ctrl = _controller(
-          repo,
-          db,
-          feedback,
-          _row(
-            nomenclature: 'Седло',
-            nomenclatureCode: '015.020.063.00052',
-            characteristic: '',
-          ),
-        );
+    test('ошибка POST не показывается, если регистр подтверждает ту же позицию', () async {
+      when(
+        () => repo.addScannedBarcode(any(), any(), any()),
+      ).thenAnswer((_) async => const Failure(ServerError(code: 500)));
+      when(() => repo.getBarcodeAssignment('460123')).thenAnswer(
+        (_) async => const Success(
+          BarcodeAssignment(nomenclature: '015.020.063.00052 Седло', characteristic: ''),
+        ),
+      );
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([
+          _row(nomenclature: 'Седло', nomenclatureCode: '015.020.063.00052', characteristic: ''),
+        ]),
+      );
+      final ctrl = _controller(
+        repo,
+        db,
+        feedback,
+        _row(nomenclature: 'Седло', nomenclatureCode: '015.020.063.00052', characteristic: ''),
+      );
 
-        final result = await ctrl.addScannedBarcodeAndReload(
-          lineNumber: 1,
-          nomenclature: 'Седло',
-          characteristic: '',
-          barcode: '460123',
-        );
+      final result = await ctrl.addScannedBarcodeAndReload(
+        lineNumber: 1,
+        nomenclature: 'Седло',
+        characteristic: '',
+        barcode: '460123',
+      );
 
-        expect(result.outcome, AddBarcodeOutcome.verifiedAfterTimeout);
-        expect(ctrl.scan!.rows.single.barcodes, ['460123']);
-      },
-    );
+      expect(result.outcome, AddBarcodeOutcome.verifiedAfterTimeout);
+      expect(ctrl.scan!.rows.single.barcodes, ['460123']);
+    });
   });
 
   group('assignUnknownBarcodeAndReload', () {
@@ -400,19 +381,10 @@ void main() {
       when(
         () => repo.addScannedBarcode(any(), any(), any()),
       ).thenAnswer((_) async => const Success(null));
-      when(
-        () => repo.addNewLine(any(), any(), any()),
-      ).thenAnswer((_) async => const Success(null));
-      when(
-        () => repo.getTable(any()),
-      ).thenAnswer(
+      when(() => repo.addNewLine(any(), any(), any())).thenAnswer((_) async => const Success(null));
+      when(() => repo.getTable(any())).thenAnswer(
         (_) async => Success([
-          _row(
-            lineNumber: 2,
-            nomenclature: 'Клавиатура',
-            characteristic: '',
-            qtyActual: 1,
-          ),
+          _row(lineNumber: 2, nomenclature: 'Клавиатура', characteristic: '', qtyActual: 1),
         ]),
       );
       final ctrl = _controller(repo, db, feedback, _row());
@@ -424,12 +396,8 @@ void main() {
       );
 
       expect(result.outcome, AddBarcodeOutcome.done);
-      verify(
-        () => repo.addScannedBarcode('Клавиатура', '', '123'),
-      ).called(1);
-      verify(
-        () => repo.addNewLine('АЕ-1', 'Клавиатура', ''),
-      ).called(1);
+      verify(() => repo.addScannedBarcode('Клавиатура', '', '123')).called(1);
+      verify(() => repo.addNewLine('АЕ-1', 'Клавиатура', '')).called(1);
       verify(() => repo.getTable('АЕ-1')).called(1);
       expect(ctrl.scan!.rows.single.qtyActual, 1);
     });
@@ -439,26 +407,13 @@ void main() {
         () => repo.addScannedBarcode(any(), any(), any()),
       ).thenAnswer((_) async => const Failure(NetworkError()));
       when(() => repo.getBarcodeAssignment('123')).thenAnswer(
-        (_) async => const Success(
-          BarcodeAssignment(
-            nomenclature: 'Клавиатура',
-            characteristic: 'Белая',
-          ),
-        ),
+        (_) async =>
+            const Success(BarcodeAssignment(nomenclature: 'Клавиатура', characteristic: 'Белая')),
       );
-      when(
-        () => repo.addNewLine(any(), any(), any()),
-      ).thenAnswer((_) async => const Success(null));
-      when(
-        () => repo.getTable(any()),
-      ).thenAnswer(
-        (_) async => Success([
-          _row(
-            lineNumber: 2,
-            nomenclature: 'Клавиатура',
-            characteristic: 'Белая',
-          ),
-        ]),
+      when(() => repo.addNewLine(any(), any(), any())).thenAnswer((_) async => const Success(null));
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async =>
+            Success([_row(lineNumber: 2, nomenclature: 'Клавиатура', characteristic: 'Белая')]),
       );
       final ctrl = _controller(repo, db, feedback, _row());
 
@@ -477,12 +432,8 @@ void main() {
         () => repo.addScannedBarcode(any(), any(), any()),
       ).thenAnswer((_) async => const Failure(NetworkError()));
       when(() => repo.getBarcodeAssignment('123')).thenAnswer(
-        (_) async => const Success(
-          BarcodeAssignment(
-            nomenclature: 'Другая позиция',
-            characteristic: '',
-          ),
-        ),
+        (_) async =>
+            const Success(BarcodeAssignment(nomenclature: 'Другая позиция', characteristic: '')),
       );
       final ctrl = _controller(repo, db, feedback, _row());
 
@@ -496,109 +447,74 @@ void main() {
       verifyNever(() => repo.getTable(any()));
     });
 
-    test(
-      'после ошибки повторной записи продолжает добавление уже созданного ШК',
-      () async {
-        when(
-          () => repo.addScannedBarcode(any(), any(), any()),
-        ).thenAnswer(
-          (_) async => const Failure(ServerError(code: 409)),
-        );
-        when(() => repo.getBarcodeAssignment('123')).thenAnswer(
-          (_) async => const Success(
-            BarcodeAssignment(
-              nomenclature: 'Клавиатура',
-              characteristic: 'Белая',
-            ),
+    test('после ошибки повторной записи продолжает добавление уже созданного ШК', () async {
+      when(
+        () => repo.addScannedBarcode(any(), any(), any()),
+      ).thenAnswer((_) async => const Failure(ServerError(code: 409)));
+      when(() => repo.getBarcodeAssignment('123')).thenAnswer(
+        (_) async =>
+            const Success(BarcodeAssignment(nomenclature: 'Клавиатура', characteristic: 'Белая')),
+      );
+      when(() => repo.addNewLine(any(), any(), any())).thenAnswer((_) async => const Success(null));
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([
+          _row(lineNumber: 2, nomenclature: 'Клавиатура', characteristic: 'Белая', qtyActual: 1),
+        ]),
+      );
+      final ctrl = _controller(repo, db, feedback, _row());
+
+      final result = await ctrl.assignUnknownBarcodeAndReload(
+        nomenclature: 'Клавиатура',
+        characteristic: 'Белая',
+        barcode: '123',
+      );
+
+      expect(result.outcome, AddBarcodeOutcome.verifiedAfterTimeout);
+      verify(() => repo.addNewLine('АЕ-1', 'Клавиатура', 'Белая')).called(1);
+      expect(ctrl.scan!.rows.single.qtyActual, 1);
+    });
+
+    test('добавляет позицию без характеристики, когда каталог содержит код в названии', () async {
+      when(
+        () => repo.addScannedBarcode(any(), any(), any()),
+      ).thenAnswer((_) async => const Success(null));
+      when(() => repo.addNewLine(any(), any(), any())).thenAnswer((_) async => const Success(null));
+      when(() => repo.getTable(any())).thenAnswer(
+        (_) async => Success([
+          _row(
+            lineNumber: 2,
+            nomenclature: 'Седло',
+            nomenclatureCode: '015.020.063.00052',
+            characteristic: '',
+            qtyActual: 1,
           ),
-        );
-        when(
-          () => repo.addNewLine(any(), any(), any()),
-        ).thenAnswer((_) async => const Success(null));
-        when(
-          () => repo.getTable(any()),
-        ).thenAnswer(
-          (_) async => Success([
-            _row(
-              lineNumber: 2,
-              nomenclature: 'Клавиатура',
-              characteristic: 'Белая',
-              qtyActual: 1,
-            ),
-          ]),
-        );
-        final ctrl = _controller(repo, db, feedback, _row());
+        ]),
+      );
+      final ctrl = _controller(repo, db, feedback, _row());
 
-        final result = await ctrl.assignUnknownBarcodeAndReload(
-          nomenclature: 'Клавиатура',
-          characteristic: 'Белая',
-          barcode: '123',
-        );
+      final result = await ctrl.assignUnknownBarcodeAndReload(
+        nomenclature: '015.020.063.00052 Седло',
+        characteristic: '',
+        barcode: '460123',
+      );
 
-        expect(result.outcome, AddBarcodeOutcome.verifiedAfterTimeout);
-        verify(
-          () => repo.addNewLine('АЕ-1', 'Клавиатура', 'Белая'),
-        ).called(1);
-        expect(ctrl.scan!.rows.single.qtyActual, 1);
-      },
-    );
-
-    test(
-      'добавляет позицию без характеристики, когда каталог содержит код в названии',
-      () async {
-        when(
-          () => repo.addScannedBarcode(any(), any(), any()),
-        ).thenAnswer((_) async => const Success(null));
-        when(
-          () => repo.addNewLine(any(), any(), any()),
-        ).thenAnswer((_) async => const Success(null));
-        when(
-          () => repo.getTable(any()),
-        ).thenAnswer(
-          (_) async => Success([
-            _row(
-              lineNumber: 2,
-              nomenclature: 'Седло',
-              nomenclatureCode: '015.020.063.00052',
-              characteristic: '',
-              qtyActual: 1,
-            ),
-          ]),
-        );
-        final ctrl = _controller(repo, db, feedback, _row());
-
-        final result = await ctrl.assignUnknownBarcodeAndReload(
-          nomenclature: '015.020.063.00052 Седло',
-          characteristic: '',
-          barcode: '460123',
-        );
-
-        expect(result.outcome, AddBarcodeOutcome.done);
-        expect(ctrl.scan!.rows.single.qtyActual, 1);
-        expect(ctrl.scan!.rows.single.barcodes, ['460123']);
-      },
-    );
+      expect(result.outcome, AddBarcodeOutcome.done);
+      expect(ctrl.scan!.rows.single.qtyActual, 1);
+      expect(ctrl.scan!.rows.single.barcodes, ['460123']);
+    });
   });
 
   group('deleteBarcodeAndReload', () {
     test('передаёт ШК и обновляет документ', () async {
-      when(
-        () => repo.deleteBarcode(any()),
-      ).thenAnswer((_) async => const Success(null));
+      when(() => repo.deleteBarcode(any())).thenAnswer((_) async => const Success(null));
       when(() => repo.getTable(any())).thenAnswer(
-        (_) async => Success([_row(barcodes: const ['222'])]),
+        (_) async => Success([
+          _row(barcodes: const ['222']),
+        ]),
       );
-      final ctrl = _controller(
-        repo,
-        db,
-        feedback,
-        _row(barcodes: const ['111', '222']),
-      );
+      final ctrl = _controller(repo, db, feedback, _row(barcodes: const ['111', '222']));
 
-      final r = await ctrl.deleteBarcodeAndReload(
-        lineNumber: 1,
-        barcode: ' 111 ',
-      );
+      final r = await ctrl.deleteBarcodeAndReload(lineNumber: 1, barcode: ' 111 ');
 
       expect(r.outcome, DeleteBarcodeOutcome.done);
       verify(() => repo.deleteBarcode('111')).called(1);
@@ -607,150 +523,102 @@ void main() {
     });
 
     test('успешное удаление отражается локально при ошибке обновления', () async {
-      when(
-        () => repo.deleteBarcode(any()),
-      ).thenAnswer((_) async => const Success(null));
-      when(
-        () => repo.getTable(any()),
-      ).thenAnswer((_) async => const Failure(NetworkError()));
-      final ctrl = _controller(
-        repo,
-        db,
-        feedback,
-        _row(barcodes: const ['111', '222']),
-      );
+      when(() => repo.deleteBarcode(any())).thenAnswer((_) async => const Success(null));
+      when(() => repo.getTable(any())).thenAnswer((_) async => const Failure(NetworkError()));
+      final ctrl = _controller(repo, db, feedback, _row(barcodes: const ['111', '222']));
 
-      final r = await ctrl.deleteBarcodeAndReload(
-        lineNumber: 1,
-        barcode: '111',
-      );
+      final r = await ctrl.deleteBarcodeAndReload(lineNumber: 1, barcode: '111');
 
       expect(r.outcome, DeleteBarcodeOutcome.done);
       expect(ctrl.scan!.rows.single.barcodes, const ['222']);
     });
 
     test('после сетевой ошибки исчезновение ШК подтверждает удаление', () async {
-      when(
-        () => repo.deleteBarcode(any()),
-      ).thenAnswer((_) async => const Failure(NetworkError()));
+      when(() => repo.deleteBarcode(any())).thenAnswer((_) async => const Failure(NetworkError()));
       when(() => repo.getTable(any())).thenAnswer(
-        (_) async => Success([_row(barcodes: const ['222'])]),
+        (_) async => Success([
+          _row(barcodes: const ['222']),
+        ]),
       );
-      final ctrl = _controller(
-        repo,
-        db,
-        feedback,
-        _row(barcodes: const ['111', '222']),
-      );
+      final ctrl = _controller(repo, db, feedback, _row(barcodes: const ['111', '222']));
 
-      final r = await ctrl.deleteBarcodeAndReload(
-        lineNumber: 1,
-        barcode: '111',
-      );
+      final r = await ctrl.deleteBarcodeAndReload(lineNumber: 1, barcode: '111');
 
       expect(r.outcome, DeleteBarcodeOutcome.verifiedAfterTimeout);
       expect(ctrl.scan!.rows.single.barcodes, const ['222']);
     });
 
     test('после сетевой ошибки оставшийся ШК не подтверждает удаление', () async {
-      when(
-        () => repo.deleteBarcode(any()),
-      ).thenAnswer((_) async => const Failure(NetworkError()));
+      when(() => repo.deleteBarcode(any())).thenAnswer((_) async => const Failure(NetworkError()));
       when(() => repo.getTable(any())).thenAnswer(
-        (_) async => Success([_row(barcodes: const ['111', '222'])]),
+        (_) async => Success([
+          _row(barcodes: const ['111', '222']),
+        ]),
       );
-      final ctrl = _controller(
-        repo,
-        db,
-        feedback,
-        _row(barcodes: const ['111', '222']),
-      );
+      final ctrl = _controller(repo, db, feedback, _row(barcodes: const ['111', '222']));
 
-      final r = await ctrl.deleteBarcodeAndReload(
-        lineNumber: 1,
-        barcode: '111',
-      );
+      final r = await ctrl.deleteBarcodeAndReload(lineNumber: 1, barcode: '111');
 
       expect(r.outcome, DeleteBarcodeOutcome.inconclusive);
     });
   });
 
   group('deleteLineAndReload', () {
-    test('передаёт документ и номер строки, затем удаляет строку локально', (
-      ) async {
-        when(
-          () => repo.deleteLine(any(), any()),
-        ).thenAnswer((_) async => const Success(null));
-        when(
-          () => repo.getTable(any()),
-        ).thenAnswer((_) async => const Success(<DocTableRow>[]));
-        final row = _row(lineNumber: 11);
-        final ctrl = _controller(repo, db, feedback, row);
+    test('передаёт документ и номер строки, затем удаляет строку локально', () async {
+      when(() => repo.deleteLine(any(), any())).thenAnswer((_) async => const Success(null));
+      when(() => repo.getTable(any())).thenAnswer((_) async => const Success(<DocTableRow>[]));
+      final row = _row(lineNumber: 11);
+      final ctrl = _controller(repo, db, feedback, row);
 
-        final result = await ctrl.deleteLineAndReload(row: row);
+      final result = await ctrl.deleteLineAndReload(row: row);
 
-        expect(result.outcome, DeleteLineOutcome.done);
-        verify(() => repo.deleteLine('АЕ-1', 11)).called(1);
-        verify(() => db.deleteScanProgressLine('АЕ-1', 11)).called(1);
-        expect(ctrl.scan!.rows, isEmpty);
-      });
+      expect(result.outcome, DeleteLineOutcome.done);
+      verify(() => repo.deleteLine('АЕ-1', 11)).called(1);
+      verify(() => db.deleteScanProgressLine('АЕ-1', 11)).called(1);
+      expect(ctrl.scan!.rows, isEmpty);
+    });
 
-    test('после сетевой ошибки исчезновение строки подтверждает удаление', (
-      ) async {
-        when(
-          () => repo.deleteLine(any(), any()),
-        ).thenAnswer((_) async => const Failure(NetworkError()));
-        when(
-          () => repo.getTable(any()),
-        ).thenAnswer((_) async => const Success(<DocTableRow>[]));
-        final row = _row(lineNumber: 11);
-        final ctrl = _controller(repo, db, feedback, row);
+    test('после сетевой ошибки исчезновение строки подтверждает удаление', () async {
+      when(
+        () => repo.deleteLine(any(), any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      when(() => repo.getTable(any())).thenAnswer((_) async => const Success(<DocTableRow>[]));
+      final row = _row(lineNumber: 11);
+      final ctrl = _controller(repo, db, feedback, row);
 
-        final result = await ctrl.deleteLineAndReload(row: row);
+      final result = await ctrl.deleteLineAndReload(row: row);
 
-        expect(result.outcome, DeleteLineOutcome.verifiedAfterTimeout);
-        verify(() => db.deleteScanProgressLine('АЕ-1', 11)).called(1);
-        expect(ctrl.scan!.rows, isEmpty);
-      });
+      expect(result.outcome, DeleteLineOutcome.verifiedAfterTimeout);
+      verify(() => db.deleteScanProgressLine('АЕ-1', 11)).called(1);
+      expect(ctrl.scan!.rows, isEmpty);
+    });
 
-    test('перенумерованная после удаления другая позиция сохраняется', (
-      ) async {
-        when(
-          () => repo.deleteLine(any(), any()),
-        ).thenAnswer((_) async => const Success(null));
-        final deleted = _row(lineNumber: 11, nomenclature: 'Линейка');
-        final remaining = _row(
-          lineNumber: 11,
-          nomenclature: 'Корпус',
-          nomenclatureCode: '618810',
-        );
-        when(
-          () => repo.getTable(any()),
-        ).thenAnswer((_) async => Success([remaining]));
-        final ctrl = _controller(repo, db, feedback, deleted);
+    test('перенумерованная после удаления другая позиция сохраняется', () async {
+      when(() => repo.deleteLine(any(), any())).thenAnswer((_) async => const Success(null));
+      final deleted = _row(lineNumber: 11, nomenclature: 'Линейка');
+      final remaining = _row(lineNumber: 11, nomenclature: 'Корпус', nomenclatureCode: '618810');
+      when(() => repo.getTable(any())).thenAnswer((_) async => Success([remaining]));
+      final ctrl = _controller(repo, db, feedback, deleted);
 
-        final result = await ctrl.deleteLineAndReload(row: deleted);
+      final result = await ctrl.deleteLineAndReload(row: deleted);
 
-        expect(result.outcome, DeleteLineOutcome.done);
-        expect(ctrl.scan!.rows.single.nomenclature, 'Корпус');
-      });
+      expect(result.outcome, DeleteLineOutcome.done);
+      expect(ctrl.scan!.rows.single.nomenclature, 'Корпус');
+    });
 
-    test('оставшаяся после сетевой ошибки позиция не считается удалённой', (
-      ) async {
-        when(
-          () => repo.deleteLine(any(), any()),
-        ).thenAnswer((_) async => const Failure(NetworkError()));
-        final row = _row(lineNumber: 11);
-        when(
-          () => repo.getTable(any()),
-        ).thenAnswer((_) async => Success([row]));
-        final ctrl = _controller(repo, db, feedback, row);
+    test('оставшаяся после сетевой ошибки позиция не считается удалённой', () async {
+      when(
+        () => repo.deleteLine(any(), any()),
+      ).thenAnswer((_) async => const Failure(NetworkError()));
+      final row = _row(lineNumber: 11);
+      when(() => repo.getTable(any())).thenAnswer((_) async => Success([row]));
+      final ctrl = _controller(repo, db, feedback, row);
 
-        final result = await ctrl.deleteLineAndReload(row: row);
+      final result = await ctrl.deleteLineAndReload(row: row);
 
-        expect(result.outcome, DeleteLineOutcome.inconclusive);
-        verifyNever(() => db.deleteScanProgressLine(any(), any()));
-        expect(ctrl.scan!.rows, hasLength(1));
-      });
+      expect(result.outcome, DeleteLineOutcome.inconclusive);
+      verifyNever(() => db.deleteScanProgressLine(any(), any()));
+      expect(ctrl.scan!.rows, hasLength(1));
+    });
   });
 }

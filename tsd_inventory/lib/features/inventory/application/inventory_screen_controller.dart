@@ -79,6 +79,12 @@ enum DeleteLineOutcome {
   inconclusive,
 }
 
+typedef AddBarcodeResult = ({AddBarcodeOutcome outcome, ApiError? error});
+
+typedef DeleteBarcodeResult = ({DeleteBarcodeOutcome outcome, ApiError? error});
+
+typedef DeleteLineResult = ({DeleteLineOutcome outcome, ApiError? error});
+
 class InventoryScreenController extends ChangeNotifier {
   InventoryScreenController({
     required this.docCode,
@@ -104,6 +110,33 @@ class InventoryScreenController extends ChangeNotifier {
   /// Фильтр «Только без штрихкода»: когда включён, в списке видны только
   /// строки с barcodes.isEmpty. Данные и прогресс сканирования не меняет.
   bool onlyWithoutBarcode = false;
+
+  /// Строки документа с применёнными пользовательскими фильтрами и сортировкой.
+  ///
+  /// Возвращает новый список, не меняя порядок и содержимое строк в
+  /// [ScanController].
+  List<DocTableRow> get visibleRows {
+    final query = searchQuery.toLowerCase();
+    final rows = [
+      for (final row in scan?.rows ?? const <DocTableRow>[])
+        if (!onlyWithoutBarcode || row.barcodes.isEmpty)
+          if (_matchesSearch(row, query)) row,
+    ];
+
+    rows.sort((a, b) {
+      if (unscannedFirst && a.isFound != b.isFound) {
+        return a.isFound ? 1 : -1;
+      }
+      return a.lineNumber.compareTo(b.lineNumber);
+    });
+    return rows;
+  }
+
+  bool _matchesSearch(DocTableRow row, String query) =>
+      query.isEmpty ||
+      row.nomenclature.toLowerCase().contains(query) ||
+      row.inventoryNumber.toLowerCase().contains(query) ||
+      row.nomenclatureCode.toLowerCase().contains(query);
 
   Future<void> init() async {
     final res = await repo.getTable(docCode);
@@ -138,14 +171,28 @@ class InventoryScreenController extends ChangeNotifier {
   Future<Result<void>> reload() async {
     final scan = this.scan;
     if (scan == null) return const Success(null);
-    final res = await repo.getTable(docCode);
-    if (res is Failure<List<DocTableRow>>) return Failure(res.error);
-
-    final rows = (res as Success<List<DocTableRow>>).value;
-    scan.replaceRows(rows);
-    await scan.hydrateFromDb();
-    notifyListeners();
+    final res = await _reloadRows();
+    if (res is Failure<List<DocTableRow>>) {
+      return Failure(res.error);
+    }
     return const Success(null);
+  }
+
+  Future<Result<List<DocTableRow>>> _reloadRows() async {
+    final result = await repo.getTable(docCode);
+    if (result is Success<List<DocTableRow>>) {
+      await _applyRows(result.value);
+    }
+    return result;
+  }
+
+  Future<void> _applyRows(List<DocTableRow> rows) async {
+    final scan = this.scan;
+    if (scan != null) {
+      scan.replaceRows(rows);
+      await scan.hydrateFromDb();
+    }
+    notifyListeners();
   }
 
   /// Добавить штрихкод в 1С (POST /newBarcode) и перезагрузить документ.
@@ -160,7 +207,7 @@ class InventoryScreenController extends ChangeNotifier {
   ///
   /// Возвращает пару (исход, ошибка). [AddBarcodeOutcome.failed] сопровождается
   /// исходной [ApiError] — её текст показывает пользователь.
-  Future<({AddBarcodeOutcome outcome, ApiError? error})> addBarcodeAndReload({
+  Future<AddBarcodeResult> addBarcodeAndReload({
     required String nomenclature,
     required String characteristic,
     required Set<String> prevBarcodes,
@@ -175,8 +222,7 @@ class InventoryScreenController extends ChangeNotifier {
   /// Привязать к строке уже нанесённый на товар штрихкод и перечитать
   /// документ. В отличие от генерации после сетевой ошибки проверяем
   /// конкретный штрихкод у конкретной строки.
-  Future<({AddBarcodeOutcome outcome, ApiError? error})>
-  addScannedBarcodeAndReload({
+  Future<AddBarcodeResult> addScannedBarcodeAndReload({
     required int lineNumber,
     required String nomenclature,
     required String characteristic,
@@ -220,21 +266,15 @@ class InventoryScreenController extends ChangeNotifier {
             true) {
       await reload();
       scan?.rememberRegisteredBarcode(normalized, lookup.value!);
-      return (
-        outcome: AddBarcodeOutcome.verifiedAfterTimeout,
-        error: null,
-      );
+      return (outcome: AddBarcodeOutcome.verifiedAfterTimeout, error: null);
     }
     if (err is! NetworkError) {
       return (outcome: AddBarcodeOutcome.failed, error: err);
     }
     final fallback = await _finishBarcodeAdd(
       res,
-      verifyAfterNetworkError: (rows) => _rowHasBarcode(
-        rows,
-        lineNumber: lineNumber,
-        barcode: normalized,
-      ),
+      verifyAfterNetworkError: (rows) =>
+          _rowHasBarcode(rows, lineNumber: lineNumber, barcode: normalized),
     );
     if (fallback.outcome == AddBarcodeOutcome.verifiedAfterTimeout) {
       scan?.rememberRegisteredBarcode(normalized, assignment);
@@ -245,8 +285,7 @@ class InventoryScreenController extends ChangeNotifier {
   /// Привязать неизвестный штрихкод к позиции из каталога, затем добавить
   /// выбранную позицию в открытый документ через /newStr и поставить факт +1.
   /// После сетевой ошибки записи ШК результат проверяется через /barcode/{ШК}.
-  Future<({AddBarcodeOutcome outcome, ApiError? error})>
-  assignUnknownBarcodeAndReload({
+  Future<AddBarcodeResult> assignUnknownBarcodeAndReload({
     required String nomenclature,
     required String characteristic,
     required String barcode,
@@ -292,8 +331,7 @@ class InventoryScreenController extends ChangeNotifier {
     return (outcome: AddBarcodeOutcome.inconclusive, error: null);
   }
 
-  Future<({AddBarcodeOutcome outcome, ApiError? error})>
-  _addRegisteredPositionToDocument(
+  Future<AddBarcodeResult> _addRegisteredPositionToDocument(
     BarcodeAssignment assignment, {
     required AddBarcodeOutcome successOutcome,
     String? barcode,
@@ -305,10 +343,7 @@ class InventoryScreenController extends ChangeNotifier {
         error: const ParseError('Документ не загружен'),
       );
     }
-    final result = await scan.addMissingLine(
-      assignment,
-      barcode: barcode,
-    );
+    final result = await scan.addMissingLine(assignment, barcode: barcode);
     if (result is Failure<void>) {
       return (outcome: AddBarcodeOutcome.failed, error: result.error);
     }
@@ -320,8 +355,7 @@ class InventoryScreenController extends ChangeNotifier {
   ///
   /// Если ответ сервиса потерян, перечитываем документ и считаем операцию
   /// успешной только тогда, когда конкретный штрихкод исчез из строки.
-  Future<({DeleteBarcodeOutcome outcome, ApiError? error})>
-  deleteBarcodeAndReload({
+  Future<DeleteBarcodeResult> deleteBarcodeAndReload({
     required int lineNumber,
     required String barcode,
   }) async {
@@ -341,15 +375,7 @@ class InventoryScreenController extends ChangeNotifier {
       return (outcome: DeleteBarcodeOutcome.failed, error: err);
     }
 
-    final reloadRes = await repo.getTable(docCode);
-    if (reloadRes is Success<List<DocTableRow>>) {
-      final scan = this.scan;
-      if (scan != null) {
-        scan.replaceRows(reloadRes.value);
-        await scan.hydrateFromDb();
-      }
-      notifyListeners();
-    }
+    final reloadRes = await _reloadRows();
     final removed =
         reloadRes is Success<List<DocTableRow>> &&
         !_rowHasBarcode(
@@ -369,7 +395,7 @@ class InventoryScreenController extends ChangeNotifier {
   ///
   /// При потерянном ответе проверяем удаление свежим запросом /code/: строка
   /// считается удалённой, если прежней позиции с этим номером больше нет.
-  Future<({DeleteLineOutcome outcome, ApiError? error})> deleteLineAndReload({
+  Future<DeleteLineResult> deleteLineAndReload({
     required DocTableRow row,
   }) async {
     final res = await repo.deleteLine(docCode, row.lineNumber);
@@ -401,12 +427,7 @@ class InventoryScreenController extends ChangeNotifier {
       await db.deleteScanProgressLine(docCode, row.lineNumber);
     }
     if (reloadRes is Success<List<DocTableRow>>) {
-      final scan = this.scan;
-      if (scan != null) {
-        scan.replaceRows(reloadRes.value);
-        await scan.hydrateFromDb();
-      }
-      notifyListeners();
+      await _applyRows(reloadRes.value);
     }
     return (
       outcome: removed
@@ -416,7 +437,7 @@ class InventoryScreenController extends ChangeNotifier {
     );
   }
 
-  Future<({AddBarcodeOutcome outcome, ApiError? error})> _finishBarcodeAdd(
+  Future<AddBarcodeResult> _finishBarcodeAdd(
     Result<void> res, {
     required bool Function(List<DocTableRow> rows) verifyAfterNetworkError,
   }) async {
@@ -431,18 +452,9 @@ class InventoryScreenController extends ChangeNotifier {
       return (outcome: AddBarcodeOutcome.failed, error: err);
     }
     // Сетевая ошибка — 1С могла успеть записать. Проверяем перезагрузкой.
-    final reloadRes = await repo.getTable(docCode);
-    if (reloadRes is Success<List<DocTableRow>>) {
-      final scan = this.scan;
-      if (scan != null) {
-        scan.replaceRows(reloadRes.value);
-        await scan.hydrateFromDb();
-      }
-      notifyListeners();
-    }
+    final reloadRes = await _reloadRows();
     final ok =
-        reloadRes is Success &&
-        verifyAfterNetworkError(scan?.rows ?? const []);
+        reloadRes is Success && verifyAfterNetworkError(scan?.rows ?? const []);
     return (
       outcome: ok
           ? AddBarcodeOutcome.verifiedAfterTimeout
@@ -518,10 +530,7 @@ class InventoryScreenController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void rememberRegisteredBarcode(
-    String barcode,
-    BarcodeAssignment assignment,
-  ) {
+  void rememberRegisteredBarcode(String barcode, BarcodeAssignment assignment) {
     scan?.rememberRegisteredBarcode(barcode, assignment);
     notifyListeners();
   }
