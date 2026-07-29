@@ -42,154 +42,160 @@ class RowCard extends StatelessWidget {
       color: bg,
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Column(
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(
-                  found ? Icons.check_circle : Icons.radio_button_unchecked,
-                  color: found ? scheme.secondary : scheme.outline,
-                  size: 24,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
                     row.nomenclature,
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                ),
-                if (onTapBarcode != null || onDelete != null)
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (onTapBarcode != null)
-                        // Иконка-кнопка состояния штрихкодов позиции:
-                        // barcode_available.png — есть штрихкоды,
-                        // barcode_missing.png — нет штрихкодов.
-                        IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minWidth: 40,
-                            minHeight: 40,
-                          ),
-                          style: IconButton.styleFrom(
-                            backgroundColor: scheme.surface,
-                            side: BorderSide(
-                              color: found
-                                  ? scheme.secondary
-                                  : scheme.outlineVariant,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                          icon: Image.asset(
-                            'assets/icons/barcode_${row.hasBarcodes ? 'available' : 'missing'}.png',
-                            width: 28,
-                            height: 28,
-                          ),
-                          onPressed: onTapBarcode,
-                          tooltip: row.hasBarcodes
-                              ? AppStrings.viewBarcodesTitle
-                              : AppStrings.addBarcodeTitle,
+                  if (row.characteristic.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        row.characteristic,
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: scheme.outline,
                         ),
-                      if (onTapBarcode != null && onDelete != null)
-                        const SizedBox(height: 6),
-                      if (onDelete != null)
-                        deleting
-                            ? const SizedBox(
-                                width: 40,
-                                height: 40,
-                                child: Padding(
-                                  padding: EdgeInsets.all(10),
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                ),
-                              )
-                            : IconButton(
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(
-                                  minWidth: 40,
-                                  minHeight: 40,
-                                ),
-                                style: IconButton.styleFrom(
-                                  foregroundColor: scheme.error,
-                                  backgroundColor: scheme.surface,
-                                  side: BorderSide(color: scheme.error),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                ),
-                                icon: const Icon(Icons.delete_outline),
-                                onPressed: onDelete,
-                                tooltip: AppStrings.deletePositionTooltip,
-                              ),
-                    ],
-                  ),
-              ],
-            ),
-            if (row.characteristic.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 4, left: 32),
-                child: Text(
-                  row.characteristic,
-                  style: TextStyle(fontSize: 15, color: scheme.outline),
-                ),
-              ),
-            if (row.inventoryNumber.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 2, left: 32),
-                child: Text(
-                  'Инв. ${row.inventoryNumber}',
-                  style: TextStyle(fontSize: 15, color: scheme.outline),
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.only(top: 6, left: 32),
-              child: Wrap(
-                spacing: 16,
-                runSpacing: 4,
-                children: [
-                  Text(
-                    AppStrings.qtyAccountingOf(row.qtyAccounting),
-                    style: const TextStyle(fontSize: 16),
-                  ),
-                  Text(
-                    AppStrings.qtyActualOf(row.qtyActual),
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: found ? scheme.secondary : scheme.onSurface,
+                      ),
+                    ),
+                  if (row.inventoryNumber.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        'Инв. ${row.inventoryNumber}',
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: scheme.outline,
+                        ),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Wrap(
+                      spacing: 16,
+                      runSpacing: 4,
+                      children: [
+                        Text(
+                          AppStrings.qtyAccountingOf(row.qtyAccounting),
+                          style: const TextStyle(fontSize: 16),
+                        ),
+                        Text(
+                          AppStrings.qtyActualOf(row.qtyActual),
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: found
+                                ? scheme.secondary
+                                : scheme.onSurface,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
+                  if (row.fio.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        row.fio,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: scheme.outline,
+                        ),
+                      ),
+                    ),
+                  if (discrepancy)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        '⚠ ${AppStrings.discrepancyOf(row.qtyActual, row.qtyAccounting)}',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: scheme.error,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
-            if (row.fio.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 2, left: 32),
-                child: Text(
-                  row.fio,
-                  style: TextStyle(fontSize: 14, color: scheme.outline),
-                ),
+            if (onTapBarcode != null || onDelete != null) ...[
+              const SizedBox(width: 10),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (onTapBarcode != null)
+                    // Иконка-кнопка состояния штрихкодов позиции:
+                    // barcode_available.png — есть штрихкоды,
+                    // barcode_missing.png — нет штрихкодов.
+                    IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 40,
+                        minHeight: 40,
+                      ),
+                      style: IconButton.styleFrom(
+                        backgroundColor: scheme.surface,
+                        side: BorderSide(
+                          color: found
+                              ? scheme.secondary
+                              : scheme.outlineVariant,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      icon: Image.asset(
+                        'assets/icons/barcode_${row.hasBarcodes ? 'available' : 'missing'}.png',
+                        width: 28,
+                        height: 28,
+                      ),
+                      onPressed: onTapBarcode,
+                      tooltip: row.hasBarcodes
+                          ? AppStrings.viewBarcodesTitle
+                          : AppStrings.addBarcodeTitle,
+                    ),
+                  if (onTapBarcode != null && onDelete != null)
+                    const SizedBox(height: 6),
+                  if (onDelete != null)
+                    deleting
+                        ? const SizedBox(
+                            width: 40,
+                            height: 40,
+                            child: Padding(
+                              padding: EdgeInsets.all(10),
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 40,
+                              minHeight: 40,
+                            ),
+                            style: IconButton.styleFrom(
+                              foregroundColor: scheme.error,
+                              backgroundColor: scheme.surface,
+                              side: BorderSide(color: scheme.error),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: onDelete,
+                            tooltip: AppStrings.deletePositionTooltip,
+                          ),
+                ],
               ),
-            if (discrepancy)
-              Padding(
-                padding: const EdgeInsets.only(top: 6, left: 32),
-                child: Text(
-                  '⚠ ${AppStrings.discrepancyOf(row.qtyActual, row.qtyAccounting)}',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: scheme.error,
-                  ),
-                ),
-              ),
+            ],
           ],
         ),
       ),

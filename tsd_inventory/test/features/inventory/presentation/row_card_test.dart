@@ -223,4 +223,27 @@ void main() {
     await tester.tap(deleteButton);
     expect(deleted, true);
   });
+
+  testWidgets('круг состояния скрыт, характеристика сразу под названием', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      wrap(
+        RowCard(
+          row: _row(barcodes: const ['111'], qtyActual: 1),
+          onTapBarcode: () {},
+          onDelete: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.check_circle), findsNothing);
+    expect(find.byIcon(Icons.radio_button_unchecked), findsNothing);
+
+    final titleRect = tester.getRect(find.text('Монитор'));
+    final characteristicRect = tester.getRect(find.text('Black'));
+    expect(characteristicRect.left, titleRect.left);
+    expect(characteristicRect.top - titleRect.bottom, lessThanOrEqualTo(6));
+  });
 }
