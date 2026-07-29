@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/network/api_error.dart';
 import '../../../core/result/result.dart';
 import '../../../l10n/app_strings.dart';
 import '../application/inventory_screen_controller.dart';
@@ -87,10 +86,9 @@ void _showBarcodeAdded(BuildContext context) {
 
 /// Окно добавления штрихкода для позиции без штрихкодов (barcode_missing).
 ///
-/// Показывает номенклатуру (не редактируется) и характеристику: если она уже
-/// заполнена в строке — показывается предзаполненной; иначе загружается список
-/// характеристик выбранной номенклатуры (GET /hs/inventory/invent/{Номенклатура})
-/// с вариантом «Без характеристики» (отправляется пустая строка).
+/// Показывает номенклатуру и заданную у строки характеристику только для чтения.
+/// Если у позиции характеристики нет, поле выбора не отображается и в 1С
+/// отправляется пустая строка.
 ///
 /// POST /hs/inventory/newBarcode → при успехе перезагрузка документа, новый
 /// штрихкод берётся из обновлённого массива «Штрихкоды». Окно не закрывается
@@ -111,63 +109,15 @@ class AddBarcodeDialog extends ConsumerStatefulWidget {
 }
 
 class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
-  List<String>? _characteristics; // null — ещё не загружены
-  ApiError? _loadError;
-  String? _selected; // выбранная характеристика ('' = «Без характеристики»)
   bool _sending = false;
-
-  bool get _charPrefilled => widget.row.characteristic.isNotEmpty;
-
-  @override
-  void initState() {
-    super.initState();
-    if (_charPrefilled) {
-      _selected = widget.row.characteristic;
-      _characteristics = const []; // список не нужен — характеристика уже есть
-    } else {
-      _loadCharacteristics();
-    }
-  }
-
-  Future<void> _loadCharacteristics() async {
-    setState(() {
-      _characteristics = null;
-      _loadError = null;
-    });
-    final res = await widget.ctrl.repo.getCharacteristics(
-      widget.row.nomenclature,
-    );
-    if (!mounted) return;
-    res.maybeWhen(
-      onValue: (list) {
-        setState(() {
-          _characteristics = list;
-          // Пустое значение допустимо только когда 1С не вернула ни одной
-          // характеристики. Единственную реальную характеристику (включая
-          // «-») выбираем автоматически.
-          _selected = list.isEmpty
-              ? ''
-              : list.length == 1
-              ? list.single
-              : null;
-        });
-      },
-      orElse: (err) {
-        setState(() {
-          _loadError = err;
-        });
-      },
-    );
-  }
 
   Future<void> _add() async {
     if (_sending) return; // защита от двойного нажатия
-    final characteristic = _selected ?? '';
     final prevBarcodes = <String>{...widget.row.barcodes};
     setState(() => _sending = true);
     final result = await widget.ctrl.addBarcodeAndReload(
       nomenclature: widget.row.nomenclature,
-      characteristic: characteristic,
+      characteristic: widget.row.characteristic,
       prevBarcodes: prevBarcodes,
     );
     if (!mounted) return;
@@ -217,7 +167,7 @@ class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
     final result = await widget.ctrl.addScannedBarcodeAndReload(
       lineNumber: widget.row.lineNumber,
       nomenclature: widget.row.nomenclature,
-      characteristic: _selected ?? widget.row.characteristic,
+      characteristic: widget.row.characteristic,
       barcode: barcode,
     );
     if (!mounted) return;
@@ -268,8 +218,17 @@ class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
               widget.row.nomenclature,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
             ),
-            const SizedBox(height: 12),
-            _characteristicField(scheme),
+            if (widget.row.characteristic.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                AppStrings.characteristicLabel,
+                style: TextStyle(fontSize: 14, color: scheme.outline),
+              ),
+              Text(
+                widget.row.characteristic,
+                style: const TextStyle(fontSize: 16),
+              ),
+            ],
           ],
         ),
       ),
@@ -290,7 +249,7 @@ class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
-                onPressed: _canSubmit ? (_sending ? null : _addScanned) : null,
+                onPressed: _sending ? null : _addScanned,
                 icon: const Icon(Icons.qr_code_scanner),
                 label: const Text(AppStrings.scanBarcodeFromItem),
               ),
@@ -307,7 +266,7 @@ class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
-              onPressed: _canSubmit ? (_sending ? null : _add) : null,
+              onPressed: _sending ? null : _add,
               child: _sending
                   ? const SizedBox(
                       width: 22,
@@ -332,76 +291,6 @@ class _AddBarcodeDialogState extends ConsumerState<AddBarcodeDialog> {
     );
   }
 
-  bool get _canSubmit {
-    if (_sending) return true;
-    if (_charPrefilled) return true; // характеристика уже есть
-    return _characteristics != null &&
-        _loadError == null &&
-        _selected != null;
-  }
-
-  Widget _characteristicField(ColorScheme scheme) {
-    if (_charPrefilled) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            AppStrings.characteristicLabel,
-            style: TextStyle(fontSize: 14, color: scheme.outline),
-          ),
-          Text(widget.row.characteristic, style: const TextStyle(fontSize: 16)),
-        ],
-      );
-    }
-    if (_loadError != null) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(_loadError!.userMessage, style: TextStyle(color: scheme.error)),
-          const SizedBox(height: 8),
-          OutlinedButton(
-            onPressed: _loadCharacteristics,
-            child: const Text(AppStrings.retry),
-          ),
-        ],
-      );
-    }
-    final list = _characteristics;
-    if (list == null) {
-      return const Row(
-        children: [
-          SizedBox(
-            width: 18,
-            height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-          SizedBox(width: 12),
-          Text(AppStrings.loadingCharacteristics),
-        ],
-      );
-    }
-    // «Без характеристики» допустимо только при реально пустом списке 1С.
-    // Значение «-» остаётся обычной самостоятельной характеристикой.
-    final items = list.isEmpty ? const <String>[''] : list;
-    return DropdownButtonFormField<String>(
-      decoration: const InputDecoration(
-        labelText: AppStrings.characteristicLabel,
-      ),
-      initialValue: _selected ?? '',
-      items: [
-        for (final c in items)
-          DropdownMenuItem(
-            value: c,
-            child: Text(c.isEmpty ? AppStrings.withoutCharacteristic : c),
-          ),
-      ],
-      onChanged: _sending
-          ? null
-          : (v) {
-              if (v != null) setState(() => _selected = v);
-            },
-    );
-  }
 }
 
 /// Окно просмотра штрихкодов позиции (barcode_available): номенклатура,

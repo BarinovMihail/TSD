@@ -130,7 +130,7 @@ void main() {
       },
     );
 
-    testWidgets('пустой список → «Без характеристики» отправляет ""', (
+    testWidgets('пустая характеристика → выбор скрыт и отправляется ""', (
       tester,
     ) async {
       when(
@@ -149,7 +149,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text(AppStrings.withoutCharacteristic), findsOneWidget);
+      expect(find.byType(DropdownButtonFormField<String>), findsNothing);
+      expect(find.text(AppStrings.characteristicLabel), findsNothing);
+      expect(find.text(AppStrings.withoutCharacteristic), findsNothing);
+      verifyNever(() => repo.getCharacteristics(any()));
       await tester.tap(find.text('Добавить штрихкод'));
       await tester.pumpAndSettle();
 
@@ -160,7 +163,7 @@ void main() {
       expect(captured[1], '');
     });
 
-    testWidgets('единственная характеристика «-» не заменяется пустой', (
+    testWidgets('характеристики из каталога не предлагаются пустой строке', (
       tester,
     ) async {
       when(
@@ -179,12 +182,14 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('-'), findsOneWidget);
+      expect(find.byType(DropdownButtonFormField<String>), findsNothing);
+      expect(find.text('-'), findsNothing);
       expect(find.text(AppStrings.withoutCharacteristic), findsNothing);
+      verifyNever(() => repo.getCharacteristics(any()));
       await tester.tap(find.text(AppStrings.addBarcode));
       await tester.pumpAndSettle();
 
-      verify(() => repo.addBarcode('Монитор', '-')).called(1);
+      verify(() => repo.addBarcode('Монитор', '')).called(1);
     });
 
     testWidgets(
@@ -241,7 +246,7 @@ void main() {
 
       verify(() => repo.addBarcode(any(), any())).called(1);
       verify(() => repo.getTable('АЕ-1')).called(1); // перезагрузка
-      expect(find.text('Штрихкод успешно добавлен'), findsOneWidget);
+      expect(find.text(AppStrings.addBarcodeTitle), findsNothing);
     });
 
     testWidgets('ошибка POST (сервер) → окно открыто, есть «Повторить»', (
@@ -328,7 +333,7 @@ void main() {
       },
     );
 
-    testWidgets('ошибка загрузки характеристик → кнопка «Повторить»', (
+    testWidgets('пустая характеристика не зависит от ошибки каталога', (
       tester,
     ) async {
       when(
@@ -341,7 +346,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Повторить'), findsOneWidget);
+      expect(find.text(AppStrings.retry), findsNothing);
+      expect(find.text(AppStrings.addBarcode), findsOneWidget);
+      verifyNever(() => repo.getCharacteristics(any()));
     });
   });
 
