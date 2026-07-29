@@ -25,6 +25,7 @@ DocTableRow _row({
   String nomenclature = 'Монитор',
   String nomenclatureCode = '001',
   String characteristic = '',
+  int qtyActual = 0,
 }) => DocTableRow(
   lineNumber: lineNumber,
   inventoryNumber: '',
@@ -35,7 +36,7 @@ DocTableRow _row({
   seriesStatus: '0',
   fio: '',
   qtyAccounting: 1,
-  qtyActual: 0,
+  qtyActual: qtyActual,
   action: '',
 );
 
@@ -78,6 +79,15 @@ void main() {
       () => db.getScanProgress(any()),
     ).thenAnswer((_) async => <int, ScanProgressData>{});
     when(
+      () => db.upsertScanProgress(
+        docCode: any(named: 'docCode'),
+        lineNo: any(named: 'lineNo'),
+        nomenclatureCode: any(named: 'nomenclatureCode'),
+        qtyActual: any(named: 'qtyActual'),
+        action: any(named: 'action'),
+      ),
+    ).thenAnswer((_) async {});
+    when(
       () => repo.getBarcodeAssignment(any()),
     ).thenAnswer((_) async => const Success(null));
     when(
@@ -94,6 +104,7 @@ void main() {
           lineNumber: 2,
           nomenclature: 'Клавиатура',
           characteristic: '',
+          qtyActual: 1,
         ),
       ]),
     );

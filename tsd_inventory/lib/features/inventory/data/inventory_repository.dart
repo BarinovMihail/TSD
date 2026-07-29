@@ -173,19 +173,42 @@ class InventoryRepository {
   }
 
   /// Список характеристик выбранной номенклатуры.
-  /// GET /hs/inventory/invent/{Номенклатура} (Номенклатура URL-encoded).
-  /// 1С может вернуть JSON-массив строк, одиночную строку или объект
-  /// с числовыми ключами.
-  /// Пустые строки отбрасываются, остальные trim-ятся.
+  ///
+  /// Перебирает несколько способов передачи имени номенклатуры в 1С, потому что
+  /// поведение веб-сервера и сама публикация HTTP-сервиса могут отличаться
+  /// между базами:
+  /// - Apache (как на ERP_Local) безусловно режет `%2F` и `%5C` в path-сегменте
+  ///   URL ещё до 1С → для позиций с `/` или `\` GET /invent/{Номенклатура}
+  ///   обречён на 404 от Apache. Зато в query-строке (`?Номенклатура=…`) эти
+  ///   символы проходят свободно — для этого 1С-сервис должен иметь GET-шаблон
+  ///   /invent, читающий `Запрос.ПараметрыЗапроса`. Кириллические ключ и
+  ///   значение обязаны быть URL-encoded в UTF-8, причём пробел — как `%20`, а
+  ///   не «+»: 1С не декодирует «+» в пробел и не находит номенклатуру. Поэтому
+  ///   query формируется вручную через [Uri.encodeComponent] (даёт `%20`), а не
+  ///   через параметр `query` Dio (тот кодирует пробел как «+»).
+  /// - Рабочая база без обновления 1С имеет только path-шаблон
+  ///   /invent/{Номенклатура}; query-шаблона там нет (404).
+  ///
+  /// Поэтому кандидаты перебираются до первого успеха (порядок важен):
+  /// 1. Path с обычным кодированием `/invent/<encodeComponent>` — базовый.
+  ///    На рабочей (необновлённой) базе срабатывает для ~99% позиций, так что
+  ///    поведение полностью совпадает с прежним — лишних запросов нет.
+  /// 2. Query-параметр `/invent?Номенклатура=…` (пробел как %20) — на обновлённой
+  ///    базе (Apache) спасает позиции с `/` и `\`, а также берёт обычные, если
+  ///    path-шаблон убран целиком (как на ERP_Local).
+  /// 3. Path с двойным кодированием route-breaking символов — для серверов,
+  ///    декодирующих `%2F`/`%5C` до маршрутизации (запасной сценарий).
+  ///
+  /// Перебор включается только при «маршрутных» HTTP-ошибках (400/404/500).
+  /// Сетевые ошибки (timeout/нет связи) переключают не стратегию, а хост — это
+  /// делает существующий failover [DioClient].
+  ///
+  /// 1С может вернуть JSON-массив строк, одиночную строку или объект с числовыми
+  /// ключами. Пустые строки отбрасываются, остальные trim-ятся.
   Future<Result<List<String>>> getCharacteristics(String nomenclature) async {
     final serverValue = _nomenclatureForServer(nomenclature);
-    final encoded = Uri.encodeComponent(serverValue);
-    final path = 'hs/inventory/invent/$encoded';
     try {
-      final res = await _getCharacteristicsResponse(
-        path: path,
-        encodedNomenclature: encoded,
-      );
+      final res = await _requestCharacteristics(serverValue);
       final data = res.data is String
           ? jsonDecode(res.data as String)
           : res.data;
@@ -217,6 +240,51 @@ class InventoryRepository {
         ParseError('Не удалось разобрать список характеристик'),
       );
     }
+  }
+
+  /// Перебирает кандидатов передачи номенклатуры в 1С и возвращает первый
+  /// успешный ответ. См. [getCharacteristics] — обоснование порядка попыток.
+  Future<Response<dynamic>> _requestCharacteristics(
+    String serverValue,
+  ) async {
+    final encoded = Uri.encodeComponent(serverValue);
+
+    // Порядок важен: path regular первым, чтобы на необновлённой рабочей базе
+    // поведение совпадало с прежним (path-шаблон /invent/{Номенклатура}).
+    //
+    // Query-кандидат формируем вручную (через Uri.encodeComponent) и встраиваем
+    // в path, а не через параметр query: Dio кодирует пробелы в query как «+»
+    // (form-encoding), а 1С не декодирует «+» в пробел → номенклатура не
+    // находится. Uri.encodeComponent даёт %20, который 1С понимает.
+    final queryPath =
+        'hs/inventory/invent?${Uri.encodeComponent('Номенклатура')}=$encoded';
+    final candidates = <Future<Response<dynamic>> Function()>[
+      () => _client.getJson<dynamic>('hs/inventory/invent/$encoded'),
+      () => _client.getJson<dynamic>(queryPath),
+      () => _client.getJson<dynamic>(
+        'hs/inventory/invent/${_encodeForDecodedRouter(encoded)}',
+      ),
+    ];
+
+    DioException? lastError;
+    for (var i = 0; i < candidates.length; i++) {
+      try {
+        return await candidates[i]();
+      } on DioException catch (e) {
+        // Сетевая ошибка → не пробуем другие стратегии (проблема в связи, а не
+        // в кодировании); пусть failover по хостам сработает или ошибка уйдёт.
+        if (!_isRouteResolutionError(e) || i == candidates.length - 1) {
+          rethrow;
+        }
+        lastError = e;
+        _log.info(
+          'Кандидат характеристик #${i + 1} не сработал (${e.response?.statusCode}), '
+          'пробую следующий способ кодирования',
+        );
+      }
+    }
+    // Не достигается: последняя итерация либо возвращает ответ, либо rethrow.
+    throw lastError!;
   }
 
   /// Добавление первого или дополнительного штрихкода позиции в 1С.
@@ -360,32 +428,6 @@ class InventoryRepository {
   static String _nomenclatureDisplayValue(String value) => value
       .replaceAll(RegExp(r'[\u0000-\u001F\u007F]'), ' ')
       .trim();
-
-  /// Некоторые web-серверы декодируют URL до передачи маршрута в 1С. Тогда
-  /// `%2F` снова становится `/` и разрывает параметр `{Номенклатура}` на два
-  /// сегмента. Сначала используем обычное URL-кодирование. Если маршрутизатор
-  /// отвечает ошибкой, повторяем запрос, оставляя опасные символы
-  /// закодированными после первого декодирования.
-  Future<Response<dynamic>> _getCharacteristicsResponse({
-    required String path,
-    required String encodedNomenclature,
-  }) async {
-    try {
-      return await _client.getJson<dynamic>(path);
-    } on DioException catch (error) {
-      final fallbackEncoded = _encodeForDecodedRouter(encodedNomenclature);
-      if (!_isRouteResolutionError(error) ||
-          fallbackEncoded == encodedNomenclature) {
-        rethrow;
-      }
-      _log.info(
-        'Повторный запрос характеристик с защищённым URL-параметром',
-      );
-      return _client.getJson<dynamic>(
-        'hs/inventory/invent/$fallbackEncoded',
-      );
-    }
-  }
 
   static bool _isRouteResolutionError(DioException error) {
     final status = error.response?.statusCode;

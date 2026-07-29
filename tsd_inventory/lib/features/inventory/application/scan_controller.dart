@@ -156,11 +156,19 @@ class ScanController extends ChangeNotifier {
     return applyChoice(match.exact.single);
   }
 
-  /// Добавить найденную в регистре позицию в документ через /newStr,
-  /// перечитать документ и поставить добавленной строке факт +1.
+  /// Добавить найденную в регистре позицию в документ через /newStr и
+  /// перечитать документ.
   ///
   /// Если такая пара уже присутствует в документе, новая строка не создаётся:
-  /// существующая строка просто отмечается как отсканированная.
+  /// существующая строка отмечается как отсканированная (+1 факт через
+  /// [applyChoice]).
+  ///
+  /// Если строки нет → создаётся через /newStr. 1С при создании сразу ставит
+  /// новой строке КоличествоФактическое = 1 (это и есть «отсканировали 1
+  /// штуку»). Поэтому после перезагрузки факт доверяется серверу и
+  /// дополнительно НЕ увеличивается — иначе получилось бы 2 локально при 1 в
+  /// 1С. Серверное значение лишь фиксируется в локальной БД, чтобы оно не
+  /// «потерялось» при следующей перезагрузке/входе на экран.
   Future<Result<void>> addMissingLine(
     BarcodeAssignment assignment, {
     String? barcode,
@@ -210,7 +218,11 @@ class ScanController extends ChangeNotifier {
         ParseError('Новая строка не найдена после добавления'),
       );
     }
-    await applyChoice(added.exact.first);
+    // 1С уже проставил новой строке факт = 1 при /newStr. Доверяем этому
+    // значению: сохраняем его в локальную БД как отсканированный прогресс,
+    // без повторного +1.
+    await _persistActual(added.exact.first);
+    await _feedback.success();
     return const Success(null);
   }
 
@@ -218,6 +230,23 @@ class ScanController extends ChangeNotifier {
     final i = rows.indexWhere((r) => r.lineNumber == row.lineNumber);
     if (i == -1) return;
     rows[i] = rows[i].copyWith(qtyActual: rows[i].qtyActual + 1);
+  }
+
+  /// Зафиксировать текущий факт строки в локальной БД без изменения значения.
+  /// Используется, когда факт уже проставлен сервером (например, 1С ставит
+  /// факт = 1 при /newStr) и его нужно лишь «закрепить» в локальном прогрессе,
+  /// чтобы значение не потерялось при следующей перезагрузке/входе на экран.
+  Future<void> _persistActual(DocTableRow row) async {
+    final i = rows.indexWhere((r) => r.lineNumber == row.lineNumber);
+    if (i == -1) return;
+    await _db.upsertScanProgress(
+      docCode: docCode,
+      lineNo: rows[i].lineNumber,
+      nomenclatureCode: rows[i].nomenclatureCode,
+      qtyActual: rows[i].qtyActual,
+      action: rows[i].action,
+    );
+    notifyListeners();
   }
 
   /// Установить факт строки в [value] (с защитой от отрицательных) и сохранить.

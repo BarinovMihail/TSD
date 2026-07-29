@@ -25,6 +25,15 @@ Response<T> _jsonResponse<T>(Object data) => Response<T>(
   data: data as T,
 );
 
+/// Строит путь запроса характеристик через query-параметр ровно так же, как
+/// InventoryRepository._requestCharacteristics: ключ и значение кодируются
+/// Uri.encodeComponent (пробел → %20, а не «+», как сделал бы Dio). Обёртка
+/// нужна, чтобы тесты не дублировать логику формирования и не расходиться с
+/// реализацией.
+String _characteristicsQueryPath(String nomenclature) =>
+    'hs/inventory/invent?${Uri.encodeComponent('Номенклатура')}'
+    '=${Uri.encodeComponent(nomenclature)}';
+
 void main() {
   late _MockClient client;
   late _MockDb db;
@@ -399,6 +408,8 @@ void main() {
     test(
       'HTTP 404 не подменяется отсутствием характеристик',
       () async {
+        // Все кандидаты (path regular, query-in-path, double-encoded) вызываются
+        // через getJson(path) с query=null и падают с 404.
         when(() => client.getJson<dynamic>(any())).thenThrow(
           DioException(
             requestOptions: RequestOptions(path: ''),
@@ -419,11 +430,105 @@ void main() {
     );
 
     test(
-      'после ошибки маршрута повторяет запрос с защищённым слешем',
+      'path regular первый: на необновлённой базе срабатывает сразу (как раньше)',
       () async {
+        // Рабочая база без правки 1С: path-шаблон /invent/{...} есть, query нет.
+        // Path regular должен сработать с первого раза — поведение как прежде,
+        // лишний запрос к query не делается.
+        const nomenclature = 'МФУ Kyocera 10/9';
+        final encoded = Uri.encodeComponent(nomenclature);
+        when(
+          () => client.getJson<dynamic>('hs/inventory/invent/$encoded'),
+        ).thenAnswer((_) async => _jsonResponse<dynamic>(['-']));
+        final repo = InventoryRepository(client: client, db: db);
+
+        final result = await repo.getCharacteristics(nomenclature);
+
+        expect((result as Success<List<String>>).value, ['-']);
+        verify(
+          () => client.getJson<dynamic>('hs/inventory/invent/$encoded'),
+        ).called(1);
+        // query-кандидат не звался — path regular сработал с первого раза.
+        verifyNever(
+          () => client.getJson<dynamic>(_characteristicsQueryPath(nomenclature)),
+        );
+      },
+    );
+
+    test(
+      'имя со слэшем: path 404 (Apache режет %2F) → query успех',
+      () async {
+        // Обновлённая база (Apache): path regular падает (404 от Apache для %2F),
+        // query-параметр пропускает %2F и возвращает характеристики.
         const nomenclature = 'МФУ Kyocera 10/9';
         final encoded = Uri.encodeComponent(nomenclature);
         final regularPath = 'hs/inventory/invent/$encoded';
+        final queryPath = _characteristicsQueryPath(nomenclature);
+        when(
+          () => client.getJson<dynamic>(regularPath),
+        ).thenThrow(
+          DioException(
+            requestOptions: RequestOptions(path: regularPath),
+            response: Response<void>(
+              requestOptions: RequestOptions(path: regularPath),
+              statusCode: 404,
+            ),
+            type: DioExceptionType.badResponse,
+          ),
+        );
+        when(
+          () => client.getJson<dynamic>(queryPath),
+        ).thenAnswer((_) async => _jsonResponse<dynamic>(['-']));
+        final repo = InventoryRepository(client: client, db: db);
+
+        final result = await repo.getCharacteristics(nomenclature);
+
+        expect((result as Success<List<String>>).value, ['-']);
+        verify(() => client.getJson<dynamic>(regularPath)).called(1);
+        verify(() => client.getJson<dynamic>(queryPath)).called(1);
+      },
+    );
+
+    test(
+      'имя с обратным слэшем: path 404 (Apache режет %5C) → query успех',
+      () async {
+        // %5C в path режется Apache так же, как %2F; query спасает.
+        const nomenclature = r'Манометр МП4-УУ2 0-250кгс\см2';
+        final encoded = Uri.encodeComponent(nomenclature);
+        final queryPath = _characteristicsQueryPath(nomenclature);
+        when(
+          () => client.getJson<dynamic>('hs/inventory/invent/$encoded'),
+        ).thenThrow(
+          DioException(
+            requestOptions: RequestOptions(path: 'hs/inventory/invent/$encoded'),
+            response: Response<void>(
+              requestOptions: RequestOptions(path: 'hs/inventory/invent/$encoded'),
+              statusCode: 404,
+            ),
+            type: DioExceptionType.badResponse,
+          ),
+        );
+        when(
+          () => client.getJson<dynamic>(queryPath),
+        ).thenAnswer((_) async => _jsonResponse<dynamic>(['-']));
+        final repo = InventoryRepository(client: client, db: db);
+
+        final result = await repo.getCharacteristics(nomenclature);
+
+        expect((result as Success<List<String>>).value, ['-']);
+        verify(() => client.getJson<dynamic>(queryPath)).called(1);
+      },
+    );
+
+    test(
+      'запасной сценарий: path 404 → query 404 → path double-encoded успех',
+      () async {
+        // Сервер декодирует %2F повторно: path regular режется, query-шаблона
+        // нет, но двойное кодирование %252F спасает.
+        const nomenclature = 'МФУ Kyocera 10/9';
+        final encoded = Uri.encodeComponent(nomenclature);
+        final regularPath = 'hs/inventory/invent/$encoded';
+        final queryPath = _characteristicsQueryPath(nomenclature);
         final protectedPath =
             'hs/inventory/invent/${encoded.replaceAll('%2F', '%252F')}';
         when(
@@ -439,6 +544,18 @@ void main() {
           ),
         );
         when(
+          () => client.getJson<dynamic>(queryPath),
+        ).thenThrow(
+          DioException(
+            requestOptions: RequestOptions(path: queryPath),
+            response: Response<void>(
+              requestOptions: RequestOptions(path: queryPath),
+              statusCode: 404,
+            ),
+            type: DioExceptionType.badResponse,
+          ),
+        );
+        when(
           () => client.getJson<dynamic>(protectedPath),
         ).thenAnswer((_) async => _jsonResponse<dynamic>(['-']));
         final repo = InventoryRepository(client: client, db: db);
@@ -447,6 +564,7 @@ void main() {
 
         expect((result as Success<List<String>>).value, ['-']);
         verify(() => client.getJson<dynamic>(regularPath)).called(1);
+        verify(() => client.getJson<dynamic>(queryPath)).called(1);
         verify(() => client.getJson<dynamic>(protectedPath)).called(1);
       },
     );
@@ -454,11 +572,16 @@ void main() {
     test(
       'защищает значимый пробел в конце исходного имени',
       () async {
+        // Между path regular и double-encoded теперь есть query-кандидат;
+        // мокаем его 404, чтобы проверить, что fallback доходит до
+        // double-encoded, защищающего краевой пробел (%20 → %2520).
         when(
           () => client.getJson<dynamic>('hs/inventory/nomen'),
         ).thenAnswer((_) async => _jsonResponse<dynamic>(['Бор Фрезы ']));
+        const serverValue = 'Бор Фрезы ';
         final regularPath =
-            'hs/inventory/invent/${Uri.encodeComponent('Бор Фрезы ')}';
+            'hs/inventory/invent/${Uri.encodeComponent(serverValue)}';
+        final queryPath = _characteristicsQueryPath(serverValue);
         final protectedPath =
             'hs/inventory/invent/${Uri.encodeComponent('Бор Фрезы')}%2520';
         when(
@@ -474,6 +597,18 @@ void main() {
           ),
         );
         when(
+          () => client.getJson<dynamic>(queryPath),
+        ).thenThrow(
+          DioException(
+            requestOptions: RequestOptions(path: queryPath),
+            response: Response<void>(
+              requestOptions: RequestOptions(path: queryPath),
+              statusCode: 404,
+            ),
+            type: DioExceptionType.badResponse,
+          ),
+        );
+        when(
           () => client.getJson<dynamic>(protectedPath),
         ).thenAnswer((_) async => _jsonResponse<dynamic>(['-']));
         final repo = InventoryRepository(client: client, db: db);
@@ -483,6 +618,7 @@ void main() {
 
         expect((result as Success<List<String>>).value, ['-']);
         verify(() => client.getJson<dynamic>(regularPath)).called(1);
+        verify(() => client.getJson<dynamic>(queryPath)).called(1);
         verify(() => client.getJson<dynamic>(protectedPath)).called(1);
       },
     );

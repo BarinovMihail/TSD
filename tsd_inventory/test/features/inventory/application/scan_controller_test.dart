@@ -316,8 +316,12 @@ void main() {
     });
 
     test(
-      'addMissingLine вызывает /newStr, перечитывает документ и ставит факт',
+      'addMissingLine вызывает /newStr, перечитывает документ и доверяет факту 1С',
       () async {
+        // 1С при /newStr сразу ставит новой строке КоличествоФактическое = 1
+        // (это и есть «отсканировали 1 штуку»). Приложение не должно делать
+        // дополнительный +1 поверх серверного значения — иначе получилось бы 2
+        // локально при 1 в 1С.
         when(
           () => repo.addNewLine(any(), any(), any()),
         ).thenAnswer((_) async => const Success(null));
@@ -328,6 +332,7 @@ void main() {
               2,
               nomenclature: 'Клавиатура',
               characteristic: 'Белая',
+              qtyActual: 1,
             ),
           ]),
         );
@@ -401,12 +406,15 @@ void main() {
         when(
           () => repo.addNewLine(any(), any(), any()),
         ).thenAnswer((_) async => const Failure(ServerError(code: 500)));
+        // 1С успела провести /newStr (несмотря на потерянный ответ) и поставила
+        // новой строке факт = 1.
         when(() => repo.getTable('АЕ-1')).thenAnswer(
           (_) async => Success([
             _row(
               2,
               nomenclature: 'Седло',
               nomenclatureCode: '015.020.063.00052',
+              qtyActual: 1,
             ),
           ]),
         );
