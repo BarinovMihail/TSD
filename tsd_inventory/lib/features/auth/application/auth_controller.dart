@@ -96,9 +96,9 @@ class AuthController extends Notifier<AuthState> {
 
   Future<void> logout() async {
     await _store.clear();
-    // Выбор ERP_Local — только до конца сессии: при выходе возвращаем ERP.
-    ref.read(connectionTargetProvider.notifier).state = AppConfig.remoteUrl;
-    // Сбрасываем запомненный рабочий хост ERP — новый вход снова начнёт с db-srv14.
+    // Выбор базы действует до конца сессии: при выходе возвращаем ERP_Local.
+    ref.read(connectionTargetProvider.notifier).state = AppConfig.localUrl;
+    // Сбрасываем запомненный рабочий хост ERP — новый вход начнёт с ERP_Local.
     DioClient.resetActiveHost();
     state = const AuthState();
   }
@@ -109,11 +109,11 @@ final authControllerProvider =
 
 // --- Провайдеры зависимостей core (общие) ---
 
-/// Выбранная база подключения: ERP (db-srv14, по умолчанию) или ERP_Local
-/// (fallback при недоступности ERP). Действует до конца сессии — при выходе
-/// сбрасывается на [AppConfig.remoteUrl] в [AuthController.logout].
+/// Выбранная база подключения: ERP_Local (по умолчанию) или ERP (db-srv14).
+/// Действует до конца сессии — при выходе сбрасывается на [AppConfig.localUrl]
+/// в [AuthController.logout].
 final connectionTargetProvider =
-    StateProvider<String>((ref) => AppConfig.remoteUrl);
+    StateProvider<String>((ref) => AppConfig.localUrl);
 
 /// Конфиг приложения с URL выбранной базы. Все репозитории/экраны получают
 /// адрес отсюда — переключение базы меняет URL во всём приложении автоматически.

@@ -2,8 +2,8 @@
 /// baseUrl настраивается (см. README): 10.0.2.2 для эмулятора, IP сервера для ТСД.
 class AppConfig {
   const AppConfig({
-    // По умолчанию — удалённая база ERP (db-srv14). См. [remoteUrl]/[localUrl].
-    this.baseUrl = remoteUrl,
+    // По умолчанию — локальная база ERP_Local. См. [remoteUrl]/[localUrl].
+    this.baseUrl = localUrl,
     this.scannerMode = ScannerMode.keyboardWedge,
     this.connectTimeoutSec = 10,
     this.receiveTimeoutSec = 30,
@@ -14,18 +14,20 @@ class AppConfig {
 
   /// Удалённая база ERP (db-srv14, основная). Сервис опубликован как `erp`
   /// (нижний регистр). Имя хоста db-srv14 — основной сетевой путь.
-  static const remoteUrl = 'http://db-srv13/erp/';
+  static const remoteUrl = 'http://db-srv14/erp/';
 
   /// Резервный адрес той же базы ERP — по IP, на случай если hostname db-srv14
   /// не резолвится/недоступен со стороны ТСД. Переключение на него прозрачно
   /// происходит в [DioClient] только при сетевой ошибке/тайм-ауте.
-  static const remoteUrlFallback = 'http://193.168.1.212/erp/';
+  static const remoteUrlFallback = 'http://192.168.1.212/erp/';
 
   /// Все сетевые адреса базы ERP (основной + резервные) для failover в Dio.
   static const remoteHosts = [remoteUrl, remoteUrlFallback];
 
-  /// Локальная база (fallback, если ERP недоступен целиком).
-  static const localUrl = 'http://192.168.1.51/ERP_Local/';
+  /// Локальная база (fallback, если ERP недоступен целиком). Публикация
+  /// зарегистрирована в нижнем регистре `erp_local` — с `ERP_Local` Apache
+  /// отдаёт 301-редирект на каждый запрос.
+  static const localUrl = 'http://192.168.1.51/erp_local/';
 
   final ScannerMode scannerMode;
   final int connectTimeoutSec;

@@ -46,6 +46,7 @@ abstract final class AppStrings {
   static const docSent = 'Отправлен';
   static const orgLabel = 'Организация';
   static const deptLabel = 'Подразделение';
+  static const personLabel = 'Физическое лицо';
   static const linesCount = 'строк';
 
   // Табличная часть

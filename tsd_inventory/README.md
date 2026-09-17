@@ -32,26 +32,27 @@ flutter build apk --release
 ## Настройка адреса сервера 1С
 
 Базовый URL задаётся в `lib/core/config/app_config.dart` (поле `baseUrl`).
-По умолчанию приложение подключается к **удалённой базе ERP** на сервере
-`db-srv14` (сервис опубликован как `erp`).
+По умолчанию приложение подключается к **локальной базе ERP_Local**
+(`192.168.1.51`); выбор базы также действует до конца сессии и сбрасывается
+при выходе (см. `connectionTargetProvider` в `auth_controller.dart`).
 
 ```dart
 class AppConfig {
   const AppConfig({
-    this.baseUrl = remoteUrl,   // = http://db-srv14/erp/ — db-srv14
+    this.baseUrl = localUrl,    // = http://192.168.1.51/erp_local/ — база по умолчанию
     ...
   });
 
-  static const remoteUrl         = 'http://db-srv14/erp/';        // основной (hostname)
+  static const remoteUrl         = 'http://db-srv14/erp/';        // рабочая база (hostname)
   static const remoteUrlFallback = 'http://192.168.1.212/erp/';   // резервный (IP)
   static const remoteHosts = [remoteUrl, remoteUrlFallback];      // для failover
-  static const localUrl    = 'http://192.168.1.51/ERP_Local/';    // fallback-база
+  static const localUrl    = 'http://192.168.1.51/erp_local/';    // база по умолчанию
 }
 ```
 
-- **ERP основной:** `http://db-srv14/erp/` (hostname сервера).
+- **ERP_Local (база по умолчанию):** `http://192.168.1.51/erp_local/`.
+- **ERP основной (рабочая):** `http://db-srv14/erp/` (hostname сервера).
 - **ERP резервный:** `http://192.168.1.212/erp/` (IP того же сервера).
-- **ERP_Local (fallback-база):** `http://192.168.1.51/ERP_Local/`.
 - **Эмулятор:** заменить хост на `10.0.2.2` (→ localhost хоста).
 - **Реальный ТСД:** адрес сервера 1С в локальной сети.
 - HTTP (cleartext) разрешён через `android:usesCleartextTraffic` +

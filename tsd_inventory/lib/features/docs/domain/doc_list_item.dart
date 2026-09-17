@@ -4,12 +4,14 @@ class DocListItem {
     required this.number,
     required this.date,
     this.department,
+    this.person,
     this.posted = false,
   });
 
   final String number; // "АЕ-00000002" (НомерДок)
   final DateTime date;
   final String? department; // "Отдел закупок" (Подразделение)
+  final String? person; // "Иванов Иван Иванович" (ФизическоеЛицо)
   final bool posted; // флаг проведения, если сервер его вернёт (иначе false)
 
   @override

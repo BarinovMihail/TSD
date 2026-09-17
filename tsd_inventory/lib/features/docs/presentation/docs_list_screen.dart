@@ -474,6 +474,14 @@ class _DocCard extends StatelessWidget {
                           style: TextStyle(fontSize: 14, color: scheme.outline),
                         ),
                       ),
+                    if (doc.person != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          '${AppStrings.personLabel}: ${doc.person}',
+                          style: TextStyle(fontSize: 14, color: scheme.outline),
+                        ),
+                      ),
                     if (sent)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
