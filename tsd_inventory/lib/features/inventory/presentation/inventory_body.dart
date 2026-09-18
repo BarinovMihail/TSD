@@ -10,6 +10,7 @@ class InventoryBody extends ConsumerWidget {
   const InventoryBody({
     super.key,
     required this.controller,
+    required this.onMarkPresent,
     required this.onUnscan,
     required this.onTapBarcode,
     required this.onDelete,
@@ -17,6 +18,7 @@ class InventoryBody extends ConsumerWidget {
   });
 
   final InventoryScreenController controller;
+  final ValueChanged<DocTableRow> onMarkPresent;
   final ValueChanged<DocTableRow> onUnscan;
   final ValueChanged<DocTableRow> onTapBarcode;
   final ValueChanged<DocTableRow> onDelete;
@@ -95,6 +97,7 @@ class InventoryBody extends ConsumerWidget {
                 final row = rows[index];
                 return RowCard(
                   row: row,
+                  onMarkPresent: () => onMarkPresent(row),
                   onTapBarcode: () => onTapBarcode(row),
                   onDelete: () => onDelete(row),
                   deleting: deletingLineNumbers.contains(row.lineNumber),

@@ -190,4 +190,7 @@ abstract final class AppStrings {
   static const unscanTitle = 'Управление фактом';
   static const unscanDecrement = 'Убрать единицу (−1)';
   static const unscanReset = 'Сбросить факт (=0)';
+
+  // Ручная отметка позиции без сканирования (галочка на карточке)
+  static const markPresentTooltip = 'Отметить: позиция соответствует';
 }

@@ -275,6 +275,13 @@ class ScanController extends ChangeNotifier {
   /// «не отсканирована»). Запись прогресса остаётся в БД с qtyActual = 0.
   Future<void> resetActual(DocTableRow row) => _setActual(row, 0);
 
+  /// Ручная отметка «позиция соответствует» (галочка на карточке, без
+  /// сканирования). Ставит факт в max(текущий, 1): повторное нажатие и
+  /// нажатие на уже отсканированную строку факт не увеличивают. Откат —
+  /// существующий декремент долгим нажатием.
+  Future<void> markPresent(DocTableRow row) =>
+      _setActual(row, row.qtyActual > 0 ? row.qtyActual : 1);
+
   /// Восстановление прогресса из БД при входе на экран.
   Future<void> hydrateFromDb() async {
     final saved = await _db.getScanProgress(docCode);

@@ -230,6 +230,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     }
   }
 
+  /// Ручная отметка «позиция соответствует» галочкой на карточке.
+  void _markPresent(DocTableRow row) {
+    _scan?.markPresent(row);
+  }
+
   /// Открытие окна штрихкода позиции по тапу на иконку:
   /// есть штрихкоды → просмотр, нет штрихкодов → добавление.
   void _openBarcodeDialog(DocTableRow row) {
@@ -496,6 +501,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
               autofocus: true,
               child: InventoryBody(
                 controller: ctrl,
+                onMarkPresent: _markPresent,
                 onUnscan: _showUnscanDialog,
                 onTapBarcode: _openBarcodeDialog,
                 onDelete: _confirmDeleteLine,

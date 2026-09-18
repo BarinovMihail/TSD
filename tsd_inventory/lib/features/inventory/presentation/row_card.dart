@@ -7,12 +7,17 @@ class RowCard extends StatelessWidget {
   const RowCard({
     super.key,
     required this.row,
+    this.onMarkPresent,
     this.onLongPress,
     this.onTapBarcode,
     this.onDelete,
     this.deleting = false,
   });
   final DocTableRow row;
+
+  /// Ручная отметка «позиция соответствует» (галочка, без сканирования).
+  /// null → кнопка не отображается.
+  final VoidCallback? onMarkPresent;
 
   /// Долгое нажатие на карточке (например, для снятия факта сканирования).
   /// null → карточка не реагирует на нажатия.
@@ -90,12 +95,12 @@ class RowCard extends StatelessWidget {
                         ),
                         Text(
                           AppStrings.qtyActualOf(row.qtyActual),
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
-                            color: found
-                                ? scheme.secondary
-                                : scheme.onSurface,
+                            // Всегда чёрный: scheme.secondary (зелёный) сливается
+                            // с зелёным фоном secondaryContainer у найденной строки.
+                            color: Colors.black,
                           ),
                         ),
                       ],
@@ -127,11 +132,43 @@ class RowCard extends StatelessWidget {
                 ],
               ),
             ),
-            if (onTapBarcode != null || onDelete != null) ...[
+            if (onMarkPresent != null || onTapBarcode != null || onDelete != null) ...[
               const SizedBox(width: 10),
               Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (onMarkPresent != null)
+                    // Галочка «позиция соответствует». Кнопка всегда активна:
+                    // markPresent идемпотентен (max(факт, 1)). Disabled-состояние
+                    // не используем — IconButton в нём не отрисовывает стиль
+                    // (фон/иконка исчезают). Отмеченная строка: залитая зелёным
+                    // кнопка с белой галочкой, неотмеченная — контурная.
+                    IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 40,
+                        minHeight: 40,
+                      ),
+                      style: IconButton.styleFrom(
+                        backgroundColor:
+                            found ? scheme.secondary : scheme.surface,
+                        side: BorderSide(
+                          color: found ? scheme.secondary : scheme.outlineVariant,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      icon: Icon(
+                        found
+                            ? Icons.check_circle
+                            : Icons.check_circle_outline,
+                        size: 26,
+                        color: found ? scheme.onSecondary : scheme.onSurface,
+                      ),
+                      onPressed: onMarkPresent,
+                      tooltip: AppStrings.markPresentTooltip,
+                    ),
                   if (onTapBarcode != null)
                     // Иконка-кнопка состояния штрихкодов позиции:
                     // barcode_available.png — есть штрихкоды,
@@ -163,7 +200,8 @@ class RowCard extends StatelessWidget {
                           ? AppStrings.viewBarcodesTitle
                           : AppStrings.addBarcodeTitle,
                     ),
-                  if (onTapBarcode != null && onDelete != null)
+                  if (onTapBarcode != null && onDelete != null ||
+                      onMarkPresent != null && onTapBarcode != null)
                     const SizedBox(height: 6),
                   if (onDelete != null)
                     deleting
